@@ -106,6 +106,32 @@ export const generateImage = async (prompt: string, size: "1K" | "2K" | "4K" = "
     }
 }
 
+export const editImage = async (base64Image: string, prompt: string): Promise<string | null> => {
+    try {
+        const ai = getAI();
+        // Uses gemini-2.5-flash-image for editing tasks as requested (Nano banana)
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+                parts: [
+                    { inlineData: { data: base64Image.split(',')[1], mimeType: 'image/png' } },
+                    { text: prompt },
+                ],
+            },
+        });
+
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                return `data:image/png;base64,${part.inlineData.data}`;
+            }
+        }
+        return null;
+    } catch (error) {
+        console.error("Image Edit Error", error);
+        return null;
+    }
+}
+
 export const chatWithMaya = async (message: string, history: any[] = []) => {
   try {
     const ai = getAI();
@@ -113,7 +139,7 @@ export const chatWithMaya = async (message: string, history: any[] = []) => {
       model: 'gemini-3-pro-preview',
       history: history,
       config: {
-         systemInstruction: "You are Maya, a helpful and efficient AI assistant for managing schedules and tasks.",
+         systemInstruction: "You are Maya, a helpful and efficient AI assistant for managing schedules and tasks. If the user asks to edit an image, instruct them to upload it first.",
          tools: [{ googleSearch: {} }] 
       }
     });

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2 } from 'lucide-react';
-import { parseSmartCommand, generateImage, generateSpeech, chatWithMaya } from '../services/geminiService';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Trash2 } from 'lucide-react';
+import { parseSmartCommand, generateImage, generateSpeech, chatWithMaya, editImage } from '../services/geminiService';
 import { CalendarEvent, Task } from '../types';
 
 interface MayaModalProps {
@@ -22,47 +22,78 @@ interface Message {
 export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction, allTasks, allEvents }) => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([
-    { id: '1', sender: 'maya', text: 'Olá! Sou a Maya. Posso agendar eventos, criar tarefas ou gerar imagens e falas. Como posso ajudar?', type: 'text' }
+    { id: '1', sender: 'maya', text: 'Olá! Sou a Maya. Posso agendar eventos, criar tarefas, gerar imagens ou editar imagens que você enviar. Como posso ajudar?', type: 'text' }
   ]);
   const [loading, setLoading] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              const base64 = reader.result as string;
+              setSelectedImage(base64);
+              addMessage('user', 'Imagem carregada para edição', 'image', base64);
+          };
+          reader.readAsDataURL(file);
+      }
+  };
+
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() && !selectedImage) return;
     const userMsg = input;
+    
+    if (userMsg.trim()) {
+        addMessage('user', userMsg);
+    }
+    
     setInput('');
-    addMessage('user', userMsg);
     setLoading(true);
 
     try {
-        // Check for specific commands first
         const lower = userMsg.toLowerCase();
-        
-        if (lower.startsWith('gerar imagem') || lower.startsWith('crie uma imagem')) {
+
+        // Image Editing Flow (Nano Banana)
+        if (selectedImage) {
+             const editPrompt = userMsg || "Descreva esta imagem";
+             const editedImage = await editImage(selectedImage, editPrompt);
+             
+             if (editedImage) {
+                 addMessage('maya', `Aqui está o resultado da edição: "${editPrompt}"`, 'image', editedImage);
+                 setSelectedImage(null); // Clear context after edit
+             } else {
+                 addMessage('maya', 'Não consegui editar a imagem. Tente um prompt diferente.');
+             }
+        }
+        // Image Generation Flow
+        else if (lower.startsWith('gerar imagem') || lower.startsWith('crie uma imagem')) {
             const prompt = userMsg.replace(/gerar imagem|crie uma imagem/i, '').trim();
-            const imageUrl = await generateImage(prompt, "1K"); // Using 1K by default, could add UI to select
+            const imageUrl = await generateImage(prompt, "1K");
             if (imageUrl) {
                 addMessage('maya', `Aqui está a imagem que você pediu: "${prompt}"`, 'image', imageUrl);
             } else {
                 addMessage('maya', 'Desculpe, não consegui gerar a imagem.');
             }
         } 
+        // TTS Flow
         else if (lower.startsWith('fale') || lower.startsWith('diga')) {
              const textToSpeak = userMsg.replace(/fale|diga/i, '').trim();
              const audioData = await generateSpeech(textToSpeak);
              if (audioData) {
-                 // Convert base64 to blob url for playback
                  const byteCharacters = atob(audioData);
                  const byteNumbers = new Array(byteCharacters.length);
                  for (let i = 0; i < byteCharacters.length; i++) {
                      byteNumbers[i] = byteCharacters.charCodeAt(i);
                  }
                  const byteArray = new Uint8Array(byteNumbers);
-                 const blob = new Blob([byteArray], {type: 'audio/mp3'}); // Adjust type if needed
+                 const blob = new Blob([byteArray], {type: 'audio/mp3'});
                  const url = URL.createObjectURL(blob);
                  addMessage('maya', `Falando: "${textToSpeak}"`, 'audio', url);
                  new Audio(url).play();
@@ -70,15 +101,14 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
                  addMessage('maya', 'Desculpe, não consegui gerar o áudio.');
              }
         }
+        // General Chat & Commands
         else {
-             // Try smart command parsing
              const command = await parseSmartCommand(userMsg);
              if (command && command.action !== 'unknown') {
                  onAction(command.action, command.action === 'create_task' ? command.taskData : command.eventData);
                  addMessage('maya', `Comando reconhecido: ${command.action}. Executando...`);
              } else {
-                 // Fallback to General Chat
-                 const history = messages.map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
+                 const history = messages.filter(m => m.type === 'text').map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
                  const response = await chatWithMaya(userMsg, history);
                  addMessage('maya', response || "Não entendi, pode repetir?");
              }
@@ -121,7 +151,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
             {messages.map((msg) => (
                 <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div className={`
-                        max-w-[80%] p-3 rounded-2xl text-sm
+                        max-w-[85%] p-3 rounded-2xl text-sm
                         ${msg.sender === 'user' 
                             ? 'bg-custom-soil text-white rounded-br-none' 
                             : 'bg-white dark:bg-zinc-800 border border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-none shadow-sm'}
@@ -129,8 +159,19 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
                         {msg.type === 'text' && <p>{msg.text}</p>}
                         {msg.type === 'image' && msg.content && (
                             <div className="space-y-2">
-                                <p>{msg.text}</p>
+                                <p className="opacity-80 text-xs mb-1">{msg.text}</p>
                                 <img src={msg.content} alt="Generated" className="rounded-lg w-full h-auto border border-white/10" />
+                                {msg.sender === 'user' && selectedImage === msg.content && (
+                                     <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Imagem selecionada para edição</div>
+                                )}
+                                {msg.sender === 'maya' && (
+                                     <button 
+                                        onClick={() => { setSelectedImage(msg.content!); addMessage('user', 'Editando esta imagem...', 'image', msg.content); }}
+                                        className="flex items-center gap-1 text-xs text-custom-caramel mt-2 hover:underline"
+                                     >
+                                        <Edit size={12} /> Editar esta imagem
+                                     </button>
+                                )}
                             </div>
                         )}
                         {msg.type === 'audio' && msg.content && (
@@ -155,27 +196,55 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
             )}
         </div>
 
+        {/* Selected Image Preview (Overlay above input) */}
+        {selectedImage && (
+             <div className="px-4 py-2 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
+                 <div className="flex items-center gap-2">
+                     <img src={selectedImage} alt="Preview" className="w-10 h-10 rounded object-cover border border-white/20" />
+                     <span className="text-xs text-gray-500">Editando imagem... (Digite o comando)</span>
+                 </div>
+                 <button onClick={() => setSelectedImage(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={14} className="text-gray-400" /></button>
+             </div>
+        )}
+
         {/* Input Area */}
         <div className="p-4 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5">
-             <div className="relative">
+             <div className="relative flex items-center gap-2">
                  <input 
-                    type="text" 
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                    placeholder="Digite uma mensagem, comando ou peça uma imagem..."
-                    className="w-full bg-gray-100 dark:bg-black/50 border-none rounded-full py-3 pl-4 pr-12 focus:ring-2 focus:ring-custom-caramel/50 dark:text-white"
+                    type="file" 
+                    ref={fileInputRef}
+                    className="hidden" 
+                    accept="image/*"
+                    onChange={handleImageUpload}
                  />
                  <button 
-                    onClick={handleSend}
-                    disabled={!input.trim() || loading}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-custom-soil text-white rounded-full hover:bg-custom-caramel disabled:opacity-50 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-3 bg-gray-100 dark:bg-white/5 text-gray-500 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                    title="Carregar imagem para edição"
                  >
-                     <Send size={16} />
+                     <ImageIcon size={18} />
                  </button>
+                 
+                 <div className="relative flex-1">
+                    <input 
+                        type="text" 
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                        placeholder={selectedImage ? "Digite como editar (ex: Filtro retrô)..." : "Mensagem, comando ou 'Gerar imagem'..."}
+                        className="w-full bg-gray-100 dark:bg-black/50 border-none rounded-full py-3 pl-4 pr-12 focus:ring-2 focus:ring-custom-caramel/50 dark:text-white"
+                    />
+                    <button 
+                        onClick={handleSend}
+                        disabled={(!input.trim() && !selectedImage) || loading}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-custom-soil text-white rounded-full hover:bg-custom-caramel disabled:opacity-50 transition-colors"
+                    >
+                        <Send size={16} />
+                    </button>
+                 </div>
              </div>
-             <div className="flex justify-center gap-4 mt-2 text-xs text-gray-400">
-                 <span className="flex items-center gap-1"><Sparkles size={10} /> Agenda Inteligente</span>
+             <div className="flex justify-center gap-4 mt-2 text-[10px] text-gray-400">
+                 <span className="flex items-center gap-1"><Upload size={10} /> Editar Imagens</span>
                  <span className="flex items-center gap-1"><ImageIcon size={10} /> Gerar Imagens</span>
                  <span className="flex items-center gap-1"><Mic size={10} /> TTS & Comandos</span>
              </div>
