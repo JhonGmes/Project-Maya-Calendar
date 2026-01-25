@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { StorageService } from '../services/storage';
-import { Lock, Mail, WifiOff, ArrowRight, Camera, Calendar, MapPin, CheckCircle, Clock, Search, MessageSquare, Bell } from 'lucide-react';
+import { Lock, Mail, WifiOff, ArrowRight, Camera, Calendar, MapPin, CheckCircle, Clock, Search, MessageSquare, Bell, Shield, Cpu } from 'lucide-react';
 
 interface LoginProps {
   onLogin: () => void;
@@ -35,43 +35,57 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#02040a] text-white relative overflow-hidden font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
+    <div className="min-h-screen flex items-center justify-center bg-[#000510] text-white relative overflow-hidden font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
         
+        {/* Background Ambient Effects (Mimicking the AI HUD reference) */}
+        <div className="absolute inset-0 z-0 pointer-events-none">
+            <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-[#000510] to-[#000510]"></div>
+            <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-900/50 to-transparent"></div>
+            <div className="absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-900/50 to-transparent"></div>
+            {/* Grid Overlay */}
+            <div className="absolute inset-0 opacity-[0.03]" 
+                 style={{
+                    backgroundImage: `linear-gradient(cyan 1px, transparent 1px), linear-gradient(90deg, cyan 1px, transparent 1px)`,
+                    backgroundSize: '50px 50px'
+                 }}>
+            </div>
+        </div>
+
         {/* Main Container */}
-        <div className="w-full h-screen flex overflow-hidden relative">
+        <div className="w-full h-screen flex overflow-hidden relative z-10">
             
-            {/* Left Panel */}
-            <div className="w-full lg:w-[45%] relative z-20 flex flex-col justify-center px-8 md:px-24 bg-[#050810] border-r border-white/5 shadow-2xl">
+            {/* Left Panel - Login Form */}
+            <div className="w-full lg:w-[40%] relative z-20 flex flex-col justify-center px-8 md:px-24 bg-[#000510]/90 backdrop-blur-xl border-r border-cyan-900/20 shadow-[10px_0_50px_rgba(0,0,0,0.5)]">
                 
-                {/* Decor: Top Left Lines */}
-                <div className="absolute top-12 left-12 flex flex-col gap-2 opacity-50">
-                    <div className="w-8 h-8 border border-cyan-800 rounded bg-cyan-950/20 flex items-center justify-center">
-                       <div className="w-3 h-3 bg-cyan-500 rounded-sm shadow-[0_0_10px_rgba(6,182,212,0.5)]"></div>
-                    </div>
-                    <div className="text-[10px] font-mono text-cyan-700 tracking-[0.2em] uppercase">System V2.0</div>
+                {/* Decor: Tech Elements */}
+                <div className="absolute top-12 left-12 flex items-center gap-3 opacity-70">
+                    <Shield className="w-6 h-6 text-cyan-500" />
+                    <div className="h-4 w-[1px] bg-cyan-800"></div>
+                    <div className="text-[10px] font-mono text-cyan-500 tracking-[0.2em] uppercase">Secure Access v3.1</div>
                 </div>
 
-                <div className="mb-10 mt-16">
-                   <h1 className="text-5xl font-bold mb-4 tracking-tight text-white font-sans">Maya Calendar<span className="text-cyan-400">.AI</span></h1>
-                   <h2 className="text-lg font-bold text-gray-200">Acessar Sistema</h2>
+                <div className="mb-10 mt-16 relative">
+                   <div className="absolute -left-6 top-0 bottom-0 w-1 bg-gradient-to-b from-cyan-500 via-blue-600 to-transparent opacity-50"></div>
+                   <h1 className="text-5xl font-bold mb-2 tracking-tight text-white font-sans">Maya<span className="text-cyan-400">.AI</span></h1>
+                   <h2 className="text-lg text-cyan-200/60 font-medium tracking-wide">Assistente de Produtividade Inteligente</h2>
                 </div>
 
-                {error && <div className="mb-6 p-4 bg-red-950/30 border border-red-900/50 text-red-200 text-sm rounded-lg backdrop-blur-sm">{error}</div>}
+                {error && <div className="mb-6 p-4 bg-red-950/30 border border-red-900/50 text-red-200 text-sm rounded-lg backdrop-blur-sm flex items-center gap-2"><Lock size={14} /> {error}</div>}
 
-                <form onSubmit={handleSupabaseLogin} className="space-y-6 max-w-md w-full">
+                <form onSubmit={handleSupabaseLogin} className="space-y-6 max-w-md w-full relative z-20">
                     
                     {/* Identity Input */}
                     <div className="space-y-2 group">
                          <label className="text-[10px] font-bold text-cyan-600 group-focus-within:text-cyan-400 tracking-widest uppercase flex items-center gap-2 transition-colors">
-                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-600 group-focus-within:bg-cyan-400 transition-colors"></span> Identity (Email)
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-600 group-focus-within:bg-cyan-400 transition-colors shadow-[0_0_8px_cyan]"></span> Identity Link
                          </label>
                          <div className="relative">
                              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                <Mail className="h-5 w-5 text-gray-600 group-focus-within:text-cyan-400 transition-colors" />
+                                <Mail className="h-5 w-5 text-cyan-900 group-focus-within:text-cyan-400 transition-colors" />
                              </div>
                              <input 
-                                className="w-full bg-[#0a0e17] border border-gray-800 text-gray-200 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-cyan-500/40 focus:bg-[#0f1420] focus:ring-1 focus:ring-cyan-500/10 transition-all placeholder:text-gray-700 font-mono text-sm"
-                                placeholder="seu@email.com"
+                                className="w-full bg-[#050a14] border border-cyan-900/30 text-cyan-100 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-cyan-500/50 focus:bg-[#081020] focus:ring-1 focus:ring-cyan-500/20 transition-all placeholder:text-cyan-900/50 font-mono text-sm shadow-inner"
+                                placeholder="usuario@sistema.ai"
                                 type="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
@@ -82,14 +96,14 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     {/* Access Key Input */}
                     <div className="space-y-2 group">
                          <label className="text-[10px] font-bold text-cyan-600 group-focus-within:text-cyan-400 tracking-widest uppercase flex items-center gap-2 transition-colors">
-                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-600 group-focus-within:bg-cyan-400 transition-colors"></span> Access Key (Senha)
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-600 group-focus-within:bg-cyan-400 transition-colors shadow-[0_0_8px_cyan]"></span> Security Key
                          </label>
                          <div className="relative">
                              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                <Lock className="h-5 w-5 text-gray-600 group-focus-within:text-cyan-400 transition-colors" />
+                                <Lock className="h-5 w-5 text-cyan-900 group-focus-within:text-cyan-400 transition-colors" />
                              </div>
                              <input 
-                                className="w-full bg-[#0a0e17] border border-gray-800 text-gray-200 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-cyan-500/40 focus:bg-[#0f1420] focus:ring-1 focus:ring-cyan-500/10 transition-all placeholder:text-gray-700 font-mono text-sm"
+                                className="w-full bg-[#050a14] border border-cyan-900/30 text-cyan-100 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-cyan-500/50 focus:bg-[#081020] focus:ring-1 focus:ring-cyan-500/20 transition-all placeholder:text-cyan-900/50 font-mono text-sm shadow-inner"
                                 placeholder="••••••••"
                                 type="password"
                                 value={password}
@@ -98,108 +112,120 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                          </div>
                     </div>
 
-                    {/* Remember me */}
-                    <div className="flex items-center pt-1">
-                        <label className="flex items-center cursor-pointer group">
-                             <input type="checkbox" className="w-4 h-4 bg-[#0a0e17] border-gray-800 rounded checked:bg-cyan-600 checked:border-cyan-600 focus:ring-0 focus:ring-offset-0 transition-all appearance-none border cursor-pointer relative after:content-[''] after:absolute after:hidden checked:after:block after:left-[5px] after:top-[1px] after:w-[5px] after:h-[10px] after:border-r-2 after:border-b-2 after:border-white after:rotate-45" />
-                             <span className="ml-3 text-[10px] text-gray-500 font-mono tracking-wider uppercase group-hover:text-gray-400 transition-colors">Lembrar meu email</span>
-                        </label>
-                    </div>
-
                     {/* Submit Button */}
                     <button 
                         type="submit" 
                         disabled={loading}
-                        className="w-full py-4 bg-[#0f1522] border border-cyan-900/30 text-white font-medium rounded-xl hover:bg-cyan-950/20 hover:border-cyan-500/50 hover:shadow-[0_0_20px_rgba(6,182,212,0.1)] transition-all duration-300 flex items-center justify-center gap-3 group mt-4 relative overflow-hidden"
+                        className="w-full py-4 bg-gradient-to-r from-cyan-900/40 to-blue-900/40 border border-cyan-500/30 text-cyan-100 font-medium rounded-xl hover:bg-cyan-500/10 hover:border-cyan-400/60 hover:shadow-[0_0_30px_rgba(6,182,212,0.15)] transition-all duration-300 flex items-center justify-center gap-3 group mt-4 relative overflow-hidden"
                     >
-                        <span className="relative z-10 font-mono uppercase tracking-[0.15em] text-xs">Entrar no Sistema</span>
-                        <ArrowRight className="relative z-10 w-4 h-4 text-cyan-500 group-hover:translate-x-1 transition-transform" />
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-500/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
+                        <span className="relative z-10 font-mono uppercase tracking-[0.15em] text-xs">Iniciar Sessão</span>
+                        <div className="absolute inset-0 bg-cyan-400/5 translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
+                        <ArrowRight className="relative z-10 w-4 h-4 text-cyan-400 group-hover:translate-x-1 transition-transform" />
                     </button>
                     
                     {/* Offline Button */}
                      <button 
                         type="button"
                         onClick={handleOfflineLogin}
-                        className="w-full py-3.5 bg-transparent border border-dashed border-gray-800 text-gray-600 rounded-xl hover:text-gray-400 hover:border-gray-600 hover:bg-white/5 transition-all flex items-center justify-center gap-2 text-[10px] font-mono uppercase tracking-widest"
+                        className="w-full py-3 bg-transparent border border-dashed border-gray-800 text-gray-500 rounded-xl hover:text-cyan-400 hover:border-cyan-800 transition-all flex items-center justify-center gap-2 text-[10px] font-mono uppercase tracking-widest"
                     >
-                        <WifiOff className="w-3 h-3" /> Entrar Offline (Modo Local)
+                        <WifiOff className="w-3 h-3" /> Modo Local (Offline)
                     </button>
                 </form>
 
-                <div className="mt-12 flex items-center justify-start gap-4 text-sm relative">
-                     <div className="absolute -top-6 left-0 w-8 h-[1px] bg-gray-800"></div>
-                     <span className="text-gray-600 text-xs">Não possui acesso?</span>
-                     <button className="text-cyan-500 hover:text-cyan-300 text-xs font-bold uppercase tracking-wide flex items-center gap-1 transition-colors">
-                        Criar uma conta <ArrowRight className="w-3 h-3" />
-                     </button>
-                </div>
-                
-                {/* Decorative bottom */}
-                <div className="absolute bottom-12 left-12 flex items-center gap-4 opacity-30">
-                     <div className="h-[2px] w-12 bg-cyan-900"></div>
-                     <div className="text-[9px] font-mono text-cyan-900 tracking-widest">SECURE CONNECTION</div>
-                     <div className="h-[2px] w-12 bg-cyan-900"></div>
+                 <div className="absolute bottom-8 left-8 right-8 flex justify-between items-end opacity-40">
+                    <div className="flex flex-col gap-1">
+                        <div className="w-16 h-[2px] bg-cyan-800"></div>
+                        <div className="text-[8px] font-mono text-cyan-600">SYS.RDY</div>
+                    </div>
+                    <Cpu className="text-cyan-800 w-6 h-6 animate-pulse" />
                 </div>
             </div>
 
-            {/* Right Panel - Illustration */}
-            <div className="hidden lg:block w-[55%] relative bg-[#02040a] overflow-hidden">
-                {/* Grid Background */}
-                <div className="absolute inset-0 z-0 opacity-20" 
-                     style={{
-                        backgroundImage: `linear-gradient(rgba(6,182,212,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(6,182,212,0.1) 1px, transparent 1px)`,
-                        backgroundSize: '40px 40px',
-                        transform: 'perspective(1000px) rotateX(20deg) scale(1.5) translateY(-100px)'
-                     }}
-                ></div>
-
-                {/* Radar/Circle Elements */}
-                <div className="absolute inset-0 flex items-center justify-center z-0">
-                     <div className="w-[800px] h-[800px] border border-cyan-500/10 rounded-full animate-spin-slow"></div>
-                     <div className="absolute w-[600px] h-[600px] border border-dashed border-cyan-500/10 rounded-full animate-spin-reverse-slow"></div>
-                     <div className="absolute w-[400px] h-[400px] border border-cyan-500/5 rounded-full"></div>
-                </div>
-
-                {/* Character Image */}
-                <div className="absolute inset-0 flex items-end justify-center z-10 pointer-events-none">
-                     <img 
-                        src="https://images.unsplash.com/photo-1535295972055-1c762f4483e5?q=80&w=1000&auto=format&fit=crop"
-                        className="h-[85%] w-auto object-contain drop-shadow-[0_0_50px_rgba(6,182,212,0.15)] grayscale-[20%] contrast-125 brightness-90"
-                        alt="Maya Agent"
-                        style={{ maskImage: 'linear-gradient(to bottom, black 90%, transparent 100%)' }}
-                     />
-                     <div className="absolute inset-0 bg-gradient-to-t from-[#02040a] via-transparent to-transparent z-20"></div>
-                </div>
+            {/* Right Panel - New Avatar & Orbit Animation */}
+            <div className="hidden lg:flex w-[60%] relative bg-[#000510] items-center justify-center overflow-hidden">
                 
-                {/* Floating Icons - positioned around the center */}
-                <div className="absolute inset-0 z-10 pointer-events-none">
-                    <div className="absolute top-[25%] right-[25%] p-3 bg-[#0a0e17]/80 backdrop-blur border border-cyan-500/30 rounded-xl text-cyan-400 animate-float" style={{animationDelay: '1s'}}>
-                        <Calendar size={20} />
-                    </div>
-                    <div className="absolute top-[45%] left-[25%] p-3 bg-[#0a0e17]/80 backdrop-blur border border-cyan-500/30 rounded-xl text-cyan-400 animate-float" style={{animationDelay: '2s'}}>
-                        <MessageSquare size={20} />
-                    </div>
-                    <div className="absolute bottom-[30%] right-[30%] p-3 bg-[#0a0e17]/80 backdrop-blur border border-cyan-500/30 rounded-xl text-cyan-400 animate-float" style={{animationDelay: '3s'}}>
-                        <MapPin size={20} />
-                    </div>
-                     <div className="absolute top-[30%] left-[35%] p-3 bg-[#0a0e17]/80 backdrop-blur border border-cyan-500/30 rounded-xl text-cyan-400 animate-float" style={{animationDelay: '0s'}}>
-                        <Camera size={20} />
-                    </div>
-                    <div className="absolute bottom-[20%] left-[30%] p-3 bg-[#0a0e17]/80 backdrop-blur border border-cyan-500/30 rounded-xl text-cyan-400 animate-float" style={{animationDelay: '1.5s'}}>
-                        <Search size={20} />
-                    </div>
-                    <div className="absolute top-[50%] right-[20%] p-3 bg-[#0a0e17]/80 backdrop-blur border border-cyan-500/30 rounded-xl text-cyan-400 animate-float" style={{animationDelay: '2.5s'}}>
-                        <CheckCircle size={20} />
-                    </div>
-                     <div className="absolute bottom-[15%] right-[40%] p-3 bg-[#0a0e17]/80 backdrop-blur border border-cyan-500/30 rounded-xl text-cyan-400 animate-float" style={{animationDelay: '0.5s'}}>
-                        <Clock size={20} />
-                    </div>
-                    <div className="absolute top-[20%] left-[20%] p-3 bg-[#0a0e17]/80 backdrop-blur border border-cyan-500/30 rounded-xl text-cyan-400 animate-float" style={{animationDelay: '3.5s'}}>
-                        <Bell size={20} />
-                    </div>
+                {/* Tech Background Effects */}
+                <div className="absolute inset-0 z-0">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-600/10 rounded-full blur-[100px]"></div>
+                    <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/circuit-board.png')] opacity-[0.05]"></div>
                 </div>
 
+                {/* Orbiting System */}
+                <div className="relative w-[600px] h-[600px] flex items-center justify-center z-10">
+                    
+                    {/* Central Image - Maya Avatar */}
+                    <div className="absolute z-20 w-[400px] h-[400px] flex items-center justify-center">
+                        <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/20 to-transparent rounded-full blur-2xl"></div>
+                        <img 
+                            src="https://i.postimg.cc/gkwB5X6m/Maya_avatarsf.png"
+                            alt="Maya AI Avatar"
+                            className="w-full h-full object-contain drop-shadow-[0_0_30px_rgba(6,182,212,0.4)] relative z-20"
+                        />
+                    </div>
+
+                    {/* Orbit Ring 1 (Icons) */}
+                    <div className="absolute inset-0 rounded-full border border-cyan-500/10 animate-spin-slow">
+                        {/* Define positions on the circle for icons. Icons counter-rotate to stay upright. */}
+                        
+                        {/* Top */}
+                        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                            <div className="p-3 bg-[#000510] border border-cyan-500/50 rounded-full text-cyan-400 shadow-[0_0_15px_cyan] animate-spin-reverse-slow">
+                                <Calendar size={20} />
+                            </div>
+                        </div>
+
+                        {/* Right */}
+                        <div className="absolute top-1/2 right-0 translate-x-1/2 -translate-y-1/2">
+                            <div className="p-3 bg-[#000510] border border-cyan-500/50 rounded-full text-cyan-400 shadow-[0_0_15px_cyan] animate-spin-reverse-slow">
+                                <MessageSquare size={20} />
+                            </div>
+                        </div>
+
+                        {/* Bottom */}
+                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2">
+                            <div className="p-3 bg-[#000510] border border-cyan-500/50 rounded-full text-cyan-400 shadow-[0_0_15px_cyan] animate-spin-reverse-slow">
+                                <CheckCircle size={20} />
+                            </div>
+                        </div>
+
+                        {/* Left */}
+                        <div className="absolute top-1/2 left-0 -translate-x-1/2 -translate-y-1/2">
+                            <div className="p-3 bg-[#000510] border border-cyan-500/50 rounded-full text-cyan-400 shadow-[0_0_15px_cyan] animate-spin-reverse-slow">
+                                <Search size={20} />
+                            </div>
+                        </div>
+
+                        {/* Diagonals (approximate positions for circle) */}
+                        <div className="absolute top-[14.6%] right-[14.6%]">
+                             <div className="p-3 bg-[#000510] border border-cyan-500/50 rounded-full text-cyan-400 shadow-[0_0_15px_cyan] animate-spin-reverse-slow">
+                                <Camera size={20} />
+                             </div>
+                        </div>
+                        <div className="absolute bottom-[14.6%] left-[14.6%]">
+                             <div className="p-3 bg-[#000510] border border-cyan-500/50 rounded-full text-cyan-400 shadow-[0_0_15px_cyan] animate-spin-reverse-slow">
+                                <Clock size={20} />
+                             </div>
+                        </div>
+                        <div className="absolute top-[14.6%] left-[14.6%]">
+                             <div className="p-3 bg-[#000510] border border-cyan-500/50 rounded-full text-cyan-400 shadow-[0_0_15px_cyan] animate-spin-reverse-slow">
+                                <Bell size={20} />
+                             </div>
+                        </div>
+                         <div className="absolute bottom-[14.6%] right-[14.6%]">
+                             <div className="p-3 bg-[#000510] border border-cyan-500/50 rounded-full text-cyan-400 shadow-[0_0_15px_cyan] animate-spin-reverse-slow">
+                                <MapPin size={20} />
+                             </div>
+                        </div>
+                    </div>
+
+                    {/* Orbit Ring 2 (Decorative Lines) */}
+                    <div className="absolute inset-10 rounded-full border border-dashed border-cyan-500/20 animate-spin-reverse-slow duration-[120s]"></div>
+                    
+                    {/* Orbit Ring 3 (Outer Glow) */}
+                    <div className="absolute -inset-10 rounded-full border border-cyan-500/5 animate-pulse"></div>
+
+                </div>
             </div>
         </div>
     </div>
