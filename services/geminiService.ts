@@ -249,7 +249,7 @@ function cleanHistory(history: any[]): Content[] {
     return cleaned;
 }
 
-export const chatWithMaya = async (message: string, history: any[] = []): Promise<ChatResponse> => {
+export const chatWithMaya = async (message: string, history: any[], mode: 'fast' | 'thinking' = 'fast'): Promise<ChatResponse> => {
   try {
     const ai = getAI();
     
@@ -263,11 +263,11 @@ export const chatWithMaya = async (message: string, history: any[] = []): Promis
     const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
     const dayName = days[now.getDay()];
 
-    const chat = ai.chats.create({
-      model: 'gemini-3-flash-preview', 
-      history: validHistory,
-      config: {
-         // Explicitly passing Weekday helps with "next Monday" vs "this Monday"
+    // Select model based on mode
+    const modelName = mode === 'thinking' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+    
+    // Define config
+    const config: any = {
          systemInstruction: `You are Maya, an efficient AI assistant. 
          Current Time: ${now.toLocaleString("pt-BR")}.
          Today is: ${dayName}.
@@ -275,7 +275,18 @@ export const chatWithMaya = async (message: string, history: any[] = []): Promis
          Important: If the user asks for an event in the past, DO NOT call the tool immediately. Ask for confirmation first.
          When calling tools, always use full ISO 8601 dates (e.g., 2024-02-26T15:00:00).`,
          tools: appTools,
-      }
+    };
+
+    // Apply Thinking Config if in Thinking Mode
+    if (mode === 'thinking') {
+        config.thinkingConfig = { thinkingBudget: 32768 }; // Max budget for deep reasoning
+        // NOTE: maxOutputTokens must NOT be set when using thinkingConfig
+    }
+
+    const chat = ai.chats.create({
+      model: modelName, 
+      history: validHistory,
+      config: config
     });
 
     const result = await chat.sendMessage({ message });
@@ -285,7 +296,7 @@ export const chatWithMaya = async (message: string, history: any[] = []): Promis
     if (functionCalls && functionCalls.length > 0) {
         const call = functionCalls[0];
         return {
-            text: "Processando...",
+            text: "Processando solicitação...",
             toolCall: {
                 name: call.name,
                 args: call.args
@@ -310,10 +321,9 @@ export const chatWithMaya = async (message: string, history: any[] = []): Promis
 
   } catch (error: any) {
     console.error("Chat Error Details:", error);
-    // Return a friendly error that the UI can display
     if (error.message.includes("API Key")) {
         return { text: "Erro: Chave de API não configurada no ambiente." };
     }
-    return { text: "Desculpe, tive um problema de conexão. Tente reformular sua frase." };
+    return { text: "Desculpe, tive um problema de conexão. Tente novamente." };
   }
 }

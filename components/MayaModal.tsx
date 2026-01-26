@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit } from 'lucide-react';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain } from 'lucide-react';
 import { generateImage, generateSpeech, chatWithMaya, editImage } from '../services/geminiService';
 import { processIAInput } from '../utils/iaEngine';
 import { executeIAAction } from '../utils/iaActions';
@@ -22,6 +22,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
 
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isThinkingMode, setIsThinkingMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -168,9 +169,11 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
              return;
         }
 
-        // 5. Intelligent Chat with Tool Calling (Gemini 3 Flash)
+        // 5. Intelligent Chat with Tool Calling (Gemini 3 Flash or Pro Thinking)
         const history = messages.filter(m => m.type === 'text').map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
-        const response = await chatWithMaya(userMsg, history);
+        
+        // Pass the mode (thinking vs fast)
+        const response = await chatWithMaya(userMsg, history, isThinkingMode ? 'thinking' : 'fast');
 
         if (response.toolCall) {
             // Execute the tool requested by Gemini
@@ -318,10 +321,11 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
             {iaStatus === 'thinking' && (
                 <div className="flex justify-start">
                     <div className="bg-white dark:bg-zinc-800 p-3 rounded-2xl rounded-bl-none shadow-sm border border-gray-100 dark:border-white/5">
-                        <div className="flex gap-1">
+                        <div className="flex gap-2 items-center">
                             <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
                             <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></span>
                             <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></span>
+                            {isThinkingMode && <span className="text-xs text-purple-500 font-bold ml-1 animate-pulse">Pensando...</span>}
                         </div>
                     </div>
                 </div>
@@ -364,21 +368,38 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                         placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "Digite como editar..." : "Mensagem ou comando...")}
-                        className="w-full bg-gray-100 dark:bg-black/50 border-none rounded-full py-3 pl-4 pr-12 focus:ring-2 focus:ring-custom-caramel/50 dark:text-white"
+                        className={`w-full bg-gray-100 dark:bg-black/50 border-none rounded-full py-3 pl-4 pr-12 focus:ring-2 dark:text-white transition-all ${isThinkingMode ? 'focus:ring-purple-500/50 bg-purple-50/10' : 'focus:ring-custom-caramel/50'}`}
                     />
                     <button 
                         onClick={handleSend}
                         disabled={(!input.trim() && !selectedImage) || iaStatus === 'thinking'}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-custom-soil text-white rounded-full hover:bg-custom-caramel disabled:opacity-50 transition-colors"
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 text-white rounded-full transition-colors disabled:opacity-50 ${isThinkingMode ? 'bg-purple-600 hover:bg-purple-500' : 'bg-custom-soil hover:bg-custom-caramel'}`}
                     >
                         <Send size={16} />
                     </button>
                  </div>
              </div>
-             <div className="flex justify-center gap-4 mt-2 text-[10px] text-gray-400">
-                 <span className="flex items-center gap-1"><Upload size={10} /> Editar Imagens</span>
-                 <span className="flex items-center gap-1"><ImageIcon size={10} /> Gerar Imagens</span>
-                 <span className="flex items-center gap-1"><Mic size={10} /> TTS & Comandos</span>
+             
+             {/* Toolbar */}
+             <div className="flex justify-between items-center mt-3">
+                 <div className="flex gap-4 text-[10px] text-gray-400">
+                    <span className="flex items-center gap-1"><Upload size={10} /> Editar</span>
+                    <span className="flex items-center gap-1"><ImageIcon size={10} /> Gerar</span>
+                 </div>
+                 
+                 {/* Thinking Mode Toggle */}
+                 <button 
+                    onClick={() => setIsThinkingMode(!isThinkingMode)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${
+                        isThinkingMode 
+                        ? 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800' 
+                        : 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-white/5 dark:text-gray-400 dark:border-white/10 hover:bg-gray-200'
+                    }`}
+                    title="Ativar modelo Gemini 3 Pro para raciocínio complexo"
+                 >
+                    <Brain size={12} className={isThinkingMode ? 'animate-pulse' : ''} />
+                    {isThinkingMode ? 'Modo Pensador Ativado' : 'Modo Rápido'}
+                 </button>
              </div>
         </div>
 
