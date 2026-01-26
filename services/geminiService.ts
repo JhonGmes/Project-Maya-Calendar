@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
-import { CalendarEvent, Task } from "../types";
+import { CalendarEvent, Task, TimeSuggestion } from "../types";
 
 // Helper to get AI instance - always creates new to ensure fresh API key usage
 const getAI = () => {
@@ -31,6 +32,62 @@ export const parseSmartCommand = async (input: string, referenceDate: Date = new
     });
     return response.text ? JSON.parse(response.text) : null;
   } catch (error) { return null; }
+};
+
+export const suggestOptimalTimes = async (
+  events: CalendarEvent[],
+  title: string,
+  referenceDate: Date,
+  workingHours: { start: string; end: string } = { start: '09:00', end: '18:00' },
+  durationMinutes: number = 60
+): Promise<TimeSuggestion[]> => {
+  try {
+    const ai = getAI();
+    
+    // Filter events to only send relevant context (e.g., surrounding days) to save tokens/latency
+    const relevantEvents = events.filter(e => {
+       const diff = Math.abs(new Date(e.start).getTime() - referenceDate.getTime());
+       return diff < 172800000; // within 2 days
+    }).map(e => ({ start: e.start, end: e.end, title: e.title }));
+
+    const prompt = `
+      Suggest 3 optimal time slots for a ${durationMinutes}-minute event titled "${title}".
+      Reference Date: ${referenceDate.toISOString()}.
+      Working Hours: ${workingHours.start} to ${workingHours.end}.
+      Existing Events: ${JSON.stringify(relevantEvents)}.
+      
+      Rules:
+      1. Avoid overlaps.
+      2. Prioritize working hours.
+      3. Suggest times near the reference date.
+      4. Provide a brief reason (e.g., "Free block in morning").
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              start: { type: Type.STRING, description: "ISO Date string" },
+              end: { type: Type.STRING, description: "ISO Date string" },
+              reason: { type: Type.STRING },
+              confidence: { type: Type.NUMBER }
+            }
+          }
+        }
+      }
+    });
+
+    return response.text ? JSON.parse(response.text) : [];
+  } catch (error) {
+    console.error("Scheduling Error", error);
+    return [];
+  }
 };
 
 export const optimizeSchedule = async (tasks: Task[], existingEvents: CalendarEvent[]) => {

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { StorageService } from '../services/storage';
-import { Lock, Mail, WifiOff, ArrowRight, Calendar, CheckCircle, Clock, Search, Cpu, Square, CheckSquare as CheckSquareIcon } from 'lucide-react';
+import { Lock, Mail, WifiOff, ArrowRight, Calendar, CheckCircle, Clock, Search, MapPin, Bell, Video, Cpu, Square, CheckSquare as CheckSquareIcon } from 'lucide-react';
 
 interface LoginProps {
   onLogin: () => void;
@@ -187,15 +187,15 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] md:w-[500px] lg:w-[600px] h-[400px] md:h-[500px] lg:h-[600px] bg-blue-600/5 rounded-full blur-[80px] md:blur-[100px]"></div>
                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/circuit-board.png')] opacity-[0.02]"></div>
                     {/* Concentric Circles Background */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] md:w-[350px] lg:w-[400px] h-[300px] md:h-[350px] lg:h-[400px] rounded-full border border-cyan-900/10"></div>
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[450px] md:w-[500px] lg:w-[600px] h-[450px] md:h-[500px] lg:h-[600px] rounded-full border border-cyan-900/10"></div>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] md:w-[450px] lg:w-[550px] h-[350px] md:h-[450px] lg:h-[550px] rounded-full border border-cyan-900/20"></div>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] md:w-[600px] lg:w-[750px] h-[500px] md:h-[600px] lg:h-[750px] rounded-full border border-cyan-900/10"></div>
                 </div>
 
                 {/* Orbiting System - Scaled based on device */}
-                <div className="relative w-[320px] h-[320px] md:w-[380px] md:h-[380px] lg:w-[450px] lg:h-[450px] flex items-center justify-center z-10">
+                <div className="relative w-[320px] h-[320px] md:w-[420px] md:h-[420px] lg:w-[520px] lg:h-[520px] flex items-center justify-center z-10">
                     
-                    {/* Central Image - Maya Avatar - Scaled down for tablet */}
-                    <div className="absolute z-20 w-[180px] md:w-[220px] lg:w-[280px] h-[250px] md:h-[320px] lg:h-[400px] flex items-center justify-center -translate-y-2">
+                    {/* Central Image - Maya Avatar */}
+                    <div className="absolute z-20 w-[180px] md:w-[240px] lg:w-[300px] h-[250px] md:h-[350px] lg:h-[420px] flex items-center justify-center -translate-y-4">
                         <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/10 via-transparent to-transparent rounded-full blur-2xl transform scale-75"></div>
                         <img 
                             src="https://i.postimg.cc/gkwB5X6m/Maya_avatarsf.png"
@@ -204,40 +204,68 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                         />
                     </div>
 
-                    {/* Orbit Ring 1 (Icons) */}
+                    {/* Orbit Ring (Icons) */}
                     <div className="absolute inset-0 rounded-full border border-cyan-500/10 animate-spin-slow">
                         
-                        {/* Top */}
+                        {/* 1. Top - Video (Camera) */}
                         <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                            <div className="p-2 md:p-2.5 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)] animate-spin-reverse-slow">
-                                <Calendar size={14} className="md:w-4 md:h-4" />
+                            <div className="p-3 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-spin-reverse-slow hover:scale-110 transition-transform">
+                                <Video size={20} />
                             </div>
                         </div>
 
-                        {/* Right */}
+                        {/* 2. Top Right - Calendar */}
+                        <div className="absolute top-[14.6%] right-[14.6%] translate-x-1/2 -translate-y-1/2">
+                            <div className="p-3 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-spin-reverse-slow hover:scale-110 transition-transform">
+                                <Calendar size={20} />
+                            </div>
+                        </div>
+
+                        {/* 3. Right - CheckCircle */}
                         <div className="absolute top-1/2 right-0 translate-x-1/2 -translate-y-1/2">
-                            <div className="p-2 md:p-2.5 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)] animate-spin-reverse-slow">
-                                <CheckCircle size={14} className="md:w-4 md:h-4" />
+                            <div className="p-3 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-spin-reverse-slow hover:scale-110 transition-transform">
+                                <CheckCircle size={20} />
                             </div>
                         </div>
 
-                        {/* Bottom */}
+                        {/* 4. Bottom Right - MapPin */}
+                        <div className="absolute bottom-[14.6%] right-[14.6%] translate-x-1/2 translate-y-1/2">
+                            <div className="p-3 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-spin-reverse-slow hover:scale-110 transition-transform">
+                                <MapPin size={20} />
+                            </div>
+                        </div>
+
+                        {/* 5. Bottom - Clock */}
                         <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2">
-                            <div className="p-2 md:p-2.5 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)] animate-spin-reverse-slow">
-                                <Clock size={14} className="md:w-4 md:h-4" />
+                            <div className="p-3 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-spin-reverse-slow hover:scale-110 transition-transform">
+                                <Clock size={20} />
                             </div>
                         </div>
 
-                        {/* Left */}
+                        {/* 6. Bottom Left - Bell */}
+                        <div className="absolute bottom-[14.6%] left-[14.6%] -translate-x-1/2 translate-y-1/2">
+                            <div className="p-3 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-spin-reverse-slow hover:scale-110 transition-transform">
+                                <Bell size={20} />
+                            </div>
+                        </div>
+
+                        {/* 7. Left - Search */}
                         <div className="absolute top-1/2 left-0 -translate-x-1/2 -translate-y-1/2">
-                            <div className="p-2 md:p-2.5 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)] animate-spin-reverse-slow">
-                                <Search size={14} className="md:w-4 md:h-4" />
+                            <div className="p-3 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-spin-reverse-slow hover:scale-110 transition-transform">
+                                <Search size={20} />
+                            </div>
+                        </div>
+
+                        {/* 8. Top Left - Mail */}
+                        <div className="absolute top-[14.6%] left-[14.6%] -translate-x-1/2 -translate-y-1/2">
+                            <div className="p-3 bg-[#020610] border border-cyan-500/30 rounded-xl text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-spin-reverse-slow hover:scale-110 transition-transform">
+                                <Mail size={20} />
                             </div>
                         </div>
                     </div>
 
                     {/* Orbit Ring 2 (Dashed) */}
-                    <div className="absolute inset-6 md:inset-8 rounded-full border border-dashed border-cyan-500/20 animate-spin-reverse-slow duration-[100s]"></div>
+                    <div className="absolute inset-12 md:inset-16 rounded-full border border-dashed border-cyan-500/20 animate-spin-reverse-slow duration-[100s]"></div>
                 </div>
             </div>
         </div>

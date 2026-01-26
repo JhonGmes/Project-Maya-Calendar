@@ -1,3 +1,4 @@
+
 export type EventColor = 'blue' | 'green' | 'red' | 'yellow' | 'purple' | 'orange';
 export type EventCategory = 'routine' | 'work' | 'meeting' | 'personal' | 'health';
 
@@ -49,3 +50,10 @@ export interface AppSettings {
 }
 
 export type ViewMode = 'day' | 'week' | 'month' | 'tasks' | 'routine';
+
+export interface TimeSuggestion {
+  start: string;
+  end: string;
+  reason: string;
+  confidence: number;
+}

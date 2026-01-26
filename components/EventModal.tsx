@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
-import { CalendarEvent, EventCategory, EventColor } from '../types';
-import { X, Calendar as CalIcon, Clock, MapPin, AlignLeft } from 'lucide-react';
+import { CalendarEvent, EventCategory, EventColor, TimeSuggestion, UserProfile } from '../types';
+import { X, Calendar as CalIcon, Clock, MapPin, AlignLeft, Sparkles, Check } from 'lucide-react';
 import { format } from 'date-fns';
+import { suggestOptimalTimes } from '../services/geminiService';
 
 interface EventModalProps {
   isOpen: boolean;
@@ -9,9 +11,11 @@ interface EventModalProps {
   onSave: (event: Partial<CalendarEvent>) => void;
   initialData: CalendarEvent | null;
   initialDate: Date;
+  existingEvents?: CalendarEvent[];
+  userProfile?: UserProfile | null;
 }
 
-export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSave, initialData, initialDate }) => {
+export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSave, initialData, initialDate, existingEvents = [], userProfile }) => {
   const [formData, setFormData] = useState<Partial<CalendarEvent>>({
     title: '',
     start: initialDate,
@@ -22,7 +26,11 @@ export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSave,
     location: ''
   });
 
+  const [suggestions, setSuggestions] = useState<TimeSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+
   useEffect(() => {
+    setSuggestions([]); // Clear suggestions on open
     if (initialData) {
       setFormData(initialData);
     } else {
@@ -41,6 +49,39 @@ export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSave,
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(formData);
+  };
+
+  const handleGetSuggestions = async () => {
+    if (!formData.title) return;
+    setLoadingSuggestions(true);
+    setSuggestions([]);
+    
+    // Default duration: 60 mins or based on current selection
+    const duration = formData.start && formData.end 
+        ? (new Date(formData.end).getTime() - new Date(formData.start).getTime()) / 60000 
+        : 60;
+
+    const workingHours = userProfile?.workingHours || { start: '09:00', end: '18:00' };
+
+    const results = await suggestOptimalTimes(
+        existingEvents,
+        formData.title || "Untitled Event",
+        formData.start || new Date(),
+        workingHours,
+        duration
+    );
+    
+    setSuggestions(results);
+    setLoadingSuggestions(false);
+  };
+
+  const applySuggestion = (suggestion: TimeSuggestion) => {
+      setFormData({
+          ...formData,
+          start: new Date(suggestion.start),
+          end: new Date(suggestion.end)
+      });
+      setSuggestions([]); // Clear after selection
   };
 
   if (!isOpen) return null;
@@ -67,6 +108,45 @@ export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSave,
               className="w-full text-xl font-medium border-b-2 border-gray-200 dark:border-gray-700 focus:border-custom-caramel bg-transparent py-2 outline-none dark:text-white placeholder:text-gray-400"
             />
           </div>
+
+          {/* AI Suggestion Button */}
+          {!initialData && (
+             <div className="flex flex-col gap-2">
+                <button 
+                    type="button"
+                    onClick={handleGetSuggestions}
+                    disabled={loadingSuggestions || !formData.title}
+                    className="flex items-center gap-2 text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-3 py-2 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 w-fit transition-colors disabled:opacity-50"
+                >
+                    <Sparkles size={14} />
+                    {loadingSuggestions ? 'Analisando agenda...' : 'Sugerir melhor horário (IA)'}
+                </button>
+                
+                {suggestions.length > 0 && (
+                    <div className="space-y-2 mt-1 animate-slide-up">
+                        <p className="text-[10px] uppercase font-bold text-gray-400">Sugestões da Maya</p>
+                        {suggestions.map((s, idx) => (
+                            <button
+                                key={idx}
+                                type="button"
+                                onClick={() => applySuggestion(s)}
+                                className="w-full text-left p-2.5 bg-gradient-to-r from-purple-50 to-white dark:from-zinc-800 dark:to-zinc-800/50 border border-purple-100 dark:border-white/10 rounded-xl hover:shadow-md transition-all group"
+                            >
+                                <div className="flex justify-between items-center">
+                                    <span className="font-mono text-sm font-bold text-purple-900 dark:text-purple-200">
+                                        {format(new Date(s.start), 'HH:mm')} - {format(new Date(s.end), 'HH:mm')}
+                                    </span>
+                                    <span className="text-[10px] bg-white dark:bg-black/20 px-2 py-0.5 rounded-full text-gray-500 border border-gray-100 dark:border-white/5 group-hover:bg-purple-500 group-hover:text-white transition-colors">
+                                        Selecionar
+                                    </span>
+                                </div>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{s.reason}</p>
+                            </button>
+                        ))}
+                    </div>
+                )}
+             </div>
+          )}
 
           <div className="flex gap-4">
             <div className="flex-1">

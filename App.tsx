@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -130,7 +131,15 @@ const App: React.FC = () => {
         </div>
       </main>
       <MayaModal isOpen={isMayaOpen} onClose={() => setMayaOpen(false)} onAction={handleAIAction} allTasks={tasks} allEvents={events} />
-      <EventModal isOpen={isEventModalOpen} onClose={() => setEventModalOpen(false)} onSave={handleSaveEvent} initialData={selectedEvent} initialDate={selectedDate} />
+      <EventModal 
+        isOpen={isEventModalOpen} 
+        onClose={() => setEventModalOpen(false)} 
+        onSave={handleSaveEvent} 
+        initialData={selectedEvent} 
+        initialDate={selectedDate}
+        existingEvents={events}
+        userProfile={profile}
+      />
       {profile && <SettingsModal isOpen={isSettingsOpen} onClose={() => setSettingsOpen(false)} profile={profile} onSaveProfile={() => {}} />}
     </div>
   );
