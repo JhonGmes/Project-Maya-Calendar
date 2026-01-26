@@ -1,13 +1,10 @@
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
 import { CalendarEvent, Task } from "../types";
 
-let aiInstance: GoogleGenAI | null = null;
+// Helper to get AI instance - always creates new to ensure fresh API key usage
 const getAI = () => {
-  if (!aiInstance) {
-    // API key must be obtained exclusively from process.env.API_KEY
-    aiInstance = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  }
-  return aiInstance;
+  // API key must be obtained exclusively from process.env.API_KEY
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 }
 
 const commandSchema: Schema = {
@@ -84,6 +81,14 @@ export const generateSpeech = async (text: string): Promise<string | null> => {
 
 export const generateImage = async (prompt: string, size: "1K" | "2K" | "4K" = "1K"): Promise<string | null> => {
     try {
+        // Enforce API key selection for gemini-3-pro-image-preview as per guidelines
+        if (typeof window !== 'undefined' && (window as any).aistudio) {
+            const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+            if (!hasKey) {
+                await (window as any).aistudio.openSelectKey();
+            }
+        }
+
         const ai = getAI();
         // Uses 3-pro for high quality image generation and size support
         const response = await ai.models.generateContent({

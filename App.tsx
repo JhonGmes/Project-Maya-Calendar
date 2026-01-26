@@ -109,7 +109,7 @@ const App: React.FC = () => {
   if (!isAuthenticated) return <Login onLogin={() => setIsAuthenticated(true)} />;
 
   return (
-    <div className="flex h-screen bg-custom-cream dark:bg-black overflow-hidden relative">
+    <div className="flex h-[100dvh] bg-custom-cream dark:bg-black overflow-hidden relative">
       <div className="absolute inset-0 bg-mesh-light dark:bg-mesh-dark opacity-40 pointer-events-none"></div>
       <ToastContainer toasts={toasts} onRemove={(id) => setToasts(t => t.filter(x => x.id !== id))} />
       <Sidebar currentView={currentView} onChangeView={setCurrentView} onLogout={() => setIsAuthenticated(false)} onOpenSettings={() => setSettingsOpen(true)} isOpenMobile={isOpenMobile} setIsOpenMobile={setIsOpenMobile} />
@@ -124,9 +124,9 @@ const App: React.FC = () => {
           {currentView === 'tasks' && <TaskView tasks={tasks} onAddTask={handleAddTask} onToggleTask={() => {}} onConvertTaskToEvent={() => {}} />}
           {currentView === 'routine' && <RoutineView events={events} onAddRoutine={() => setEventModalOpen(true)} />}
         </div>
-        <div className="absolute bottom-8 right-8 flex flex-col gap-4">
-          <button onClick={() => setMayaOpen(true)} className="w-14 h-14 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xl flex items-center justify-center hover:scale-110 transition-transform"><Sparkles size={24} /></button>
-          <button onClick={() => { setSelectedEvent(null); setEventModalOpen(true); }} className="w-14 h-14 rounded-full bg-custom-soil text-white shadow-xl flex items-center justify-center hover:scale-110 transition-transform"><Plus size={28} /></button>
+        <div className="absolute bottom-6 right-6 md:bottom-8 md:right-8 flex flex-col gap-3 md:gap-4">
+          <button onClick={() => setMayaOpen(true)} className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xl flex items-center justify-center hover:scale-110 transition-transform active:scale-90"><Sparkles size={20} className="md:w-6 md:h-6" /></button>
+          <button onClick={() => { setSelectedEvent(null); setEventModalOpen(true); }} className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-custom-soil text-white shadow-xl flex items-center justify-center hover:scale-110 transition-transform active:scale-90"><Plus size={24} className="md:w-7 md:h-7" /></button>
         </div>
       </main>
       <MayaModal isOpen={isMayaOpen} onClose={() => setMayaOpen(false)} onAction={handleAIAction} allTasks={tasks} allEvents={events} />
