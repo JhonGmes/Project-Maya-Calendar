@@ -50,7 +50,7 @@ const eventTool: FunctionDeclaration = {
         type: Type.OBJECT,
         properties: {
             title: { type: Type.STRING, description: "Title of the event" },
-            start: { type: Type.STRING, description: "ISO 8601 start date time" },
+            start: { type: Type.STRING, description: "ISO 8601 start date time (YYYY-MM-DDTHH:mm:ss)" },
             end: { type: Type.STRING, description: "ISO 8601 end date time. Usually 1 hour after start if not specified." },
             category: { type: Type.STRING, enum: ['work', 'personal', 'meeting', 'routine', 'health'] },
             location: { type: Type.STRING }
@@ -259,16 +259,21 @@ export const chatWithMaya = async (message: string, history: any[] = []): Promis
     }
 
     const validHistory = cleanHistory(history);
+    const now = new Date();
+    const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    const dayName = days[now.getDay()];
 
     const chat = ai.chats.create({
       model: 'gemini-3-flash-preview', 
       history: validHistory,
       config: {
-         // Using toLocaleString to give Gemini context of User's Local Time (e.g. Brazil GMT-3)
+         // Explicitly passing Weekday helps with "next Monday" vs "this Monday"
          systemInstruction: `You are Maya, an efficient AI assistant. 
-         Current Time: ${new Date().toLocaleString("pt-BR")}.
+         Current Time: ${now.toLocaleString("pt-BR")}.
+         Today is: ${dayName}.
          Use tools to create events/tasks.
-         Important: If the user asks for an event in the past, DO NOT call the tool immediately. Ask for confirmation first.`,
+         Important: If the user asks for an event in the past, DO NOT call the tool immediately. Ask for confirmation first.
+         When calling tools, always use full ISO 8601 dates (e.g., 2024-02-26T15:00:00).`,
          tools: appTools,
       }
     });

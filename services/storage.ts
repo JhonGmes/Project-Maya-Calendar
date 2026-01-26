@@ -86,6 +86,9 @@ export const StorageService = {
   },
 
   saveEvent: async (event: CalendarEvent): Promise<CalendarEvent> => {
+    let savedToCloud = false;
+    
+    // Tenta salvar no Supabase primeiro
     if (!isLocalMode && supabase) {
        try {
          const { data: { user } } = await supabase.auth.getUser();
@@ -97,16 +100,29 @@ export const StorageService = {
              completed: event.completed, is_all_day: event.isAllDay, description: event.description, location: event.location
            };
            const { data, error } = await supabase.from('events').upsert(payload).select();
-           if (!error && data) return mapSupabaseEvent(data[0]);
-           if (error) throw error;
+           
+           if (error) {
+               console.warn("Supabase Save Error (Event):", error);
+               // Não lança erro, deixa cair para o Local Storage como backup
+           } else if (data) {
+               savedToCloud = true;
+               return mapSupabaseEvent(data[0]);
+           }
          }
-       } catch (err) { throw err; }
+       } catch (err) { 
+           console.warn("Network Error (Event), using local fallback.", err);
+       }
     }
+
+    // Fallback Local Storage (Sempre executa se o cloud falhar ou estiver desativado)
     const events = await StorageService.getEvents();
     const index = events.findIndex(e => e.id === event.id);
     const eventToSave = { ...event, id: event.id || generateId() };
+    
+    // Se salvou na nuvem, não duplica, mas mantem o cache local atualizado
     const newEvents = index >= 0 ? [...events.slice(0, index), eventToSave, ...events.slice(index + 1)] : [...events, eventToSave];
     localStorage.setItem(LOCAL_STORAGE_KEYS.EVENTS, JSON.stringify(newEvents));
+    
     return eventToSave;
   },
 
@@ -118,7 +134,6 @@ export const StorageService = {
     localStorage.setItem(LOCAL_STORAGE_KEYS.EVENTS, JSON.stringify(events.filter(e => e.id !== id)));
   },
 
-  // Updated for Phase 23: Handle Teams
   getTasks: async (teamId?: string): Promise<Task[]> => {
     if (!isLocalMode && supabase) {
       try {
@@ -143,25 +158,28 @@ export const StorageService = {
 
   saveTask: async (task: Task): Promise<Task> => {
     if (!isLocalMode && supabase) {
-       const { data: { user } } = await supabase.auth.getUser();
-       if (user) {
-         const taskId = (task.id && task.id.length > 20) ? task.id : generateId();
-         const payload = {
-           id: taskId, 
-           user_id: user.id, 
-           title: task.title, 
-           completed: task.completed,
-           priority: task.priority, 
-           due_date: task.dueDate ? task.dueDate.toISOString() : null, 
-           description: task.description,
-           team_id: task.teamId || null // Phase 23
-         };
-         const { data, error } = await supabase.from('tasks').upsert(payload).select();
-         if (error) throw error;
-         return mapSupabaseTask(data[0]);
+       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const taskId = (task.id && task.id.length > 20) ? task.id : generateId();
+            const payload = {
+            id: taskId, 
+            user_id: user.id, 
+            title: task.title, 
+            completed: task.completed,
+            priority: task.priority, 
+            due_date: task.dueDate ? task.dueDate.toISOString() : null, 
+            description: task.description,
+            team_id: task.teamId || null // Phase 23
+            };
+            const { data, error } = await supabase.from('tasks').upsert(payload).select();
+            if (!error && data) return mapSupabaseTask(data[0]);
+        }
+       } catch (err) {
+           console.warn("Task save error, using local fallback", err);
        }
     }
-    // Local mode ignores teams for simplicity in this demo
+    // Local mode fallback
     const tasks = await StorageService.getTasks();
     const index = tasks.findIndex(t => t.id === task.id);
     const taskToSave = { ...task, id: task.id || generateId() };
@@ -173,12 +191,14 @@ export const StorageService = {
   // Phase 23: Get Teams
   getTeams: async (): Promise<Team[]> => {
      if (!isLocalMode && supabase) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-           // Fetch teams user belongs to
-           const { data } = await supabase.from('teams').select('*'); // RLS filters this
-           if (data) return data.map(t => ({ id: t.id, name: t.name, ownerId: t.owner_id }));
-        }
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+            // Fetch teams user belongs to
+            const { data } = await supabase.from('teams').select('*'); // RLS filters this
+            if (data) return data.map(t => ({ id: t.id, name: t.name, ownerId: t.owner_id }));
+            }
+        } catch (e) { return []; }
      }
      return []; // No teams in local mode
   },
@@ -203,15 +223,17 @@ export const StorageService = {
 
   updateProfile: async (profile: Partial<UserProfile>) => {
     if (!isLocalMode && supabase) {
-       const { data: { user } } = await supabase.auth.getUser();
-       if (user) {
-         const payload = {
-           name: profile.name, theme: profile.theme, working_hours: profile.workingHours,
-           notifications: profile.notifications, avatar_url: profile.avatarUrl, phone: profile.phone, role: profile.role, bio: profile.bio
-         };
-         const { data, error } = await supabase.from('profiles').update(payload).eq('id', user.id).select();
-         if (!error) return { ...profile, ...data[0] } as UserProfile;
-       }
+       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const payload = {
+            name: profile.name, theme: profile.theme, working_hours: profile.workingHours,
+            notifications: profile.notifications, avatar_url: profile.avatarUrl, phone: profile.phone, role: profile.role, bio: profile.bio
+            };
+            const { data, error } = await supabase.from('profiles').update(payload).eq('id', user.id).select();
+            if (!error && data) return { ...profile, ...data[0] } as UserProfile;
+        }
+       } catch (e) { console.warn("Profile update error", e); }
     }
     const current = await StorageService.getProfile();
     const updated = { ...current, ...profile };
@@ -235,11 +257,13 @@ export const StorageService = {
 
   getNotifications: async (): Promise<Notification[]> => {
     if (!isLocalMode && supabase) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            const { data } = await supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
-            if (data) return data.map(n => ({ id: n.id, message: n.message, read: n.read, createdAt: new Date(n.created_at) }));
-        }
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data } = await supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
+                if (data) return data.map(n => ({ id: n.id, message: n.message, read: n.read, createdAt: new Date(n.created_at) }));
+            }
+        } catch (e) {}
     }
     const data = localStorage.getItem(LOCAL_STORAGE_KEYS.NOTIFICATIONS);
     return data ? JSON.parse(data).map((n: any) => ({ ...n, createdAt: new Date(n.createdAt) })) : [];
@@ -248,10 +272,12 @@ export const StorageService = {
   saveNotification: async (msg: string): Promise<void> => {
      const newNotif = { id: generateId(), message: msg, read: false, createdAt: new Date() };
      if (!isLocalMode && supabase) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if(user) {
-            await supabase.from('notifications').insert({ user_id: user.id, message: msg, read: false });
-        }
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if(user) {
+                await supabase.from('notifications').insert({ user_id: user.id, message: msg, read: false });
+            }
+        } catch (e) {}
      }
      
      const current = localStorage.getItem(LOCAL_STORAGE_KEYS.NOTIFICATIONS);
@@ -262,11 +288,13 @@ export const StorageService = {
 
   getHistory: async (): Promise<ScoreHistory[]> => {
     if (!isLocalMode && supabase) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            const { data } = await supabase.from('productivity_history').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
-            if (data) return data.map(h => ({ id: h.id, score: h.score, createdAt: new Date(h.created_at) }));
-        }
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data } = await supabase.from('productivity_history').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
+                if (data) return data.map(h => ({ id: h.id, score: h.score, createdAt: new Date(h.created_at) }));
+            }
+        } catch(e) {}
     }
     const data = localStorage.getItem(LOCAL_STORAGE_KEYS.HISTORY);
     return data ? JSON.parse(data).map((h: any) => ({ ...h, createdAt: new Date(h.createdAt) })) : [];
@@ -279,8 +307,10 @@ export const StorageService = {
       
       if (!hasToday) {
          if (!isLocalMode && supabase) {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) await supabase.from('productivity_history').insert({ user_id: user.id, score });
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) await supabase.from('productivity_history').insert({ user_id: user.id, score });
+            } catch (e) {}
          }
          
          const newEntry = { id: generateId(), score, createdAt: new Date() };
@@ -292,16 +322,18 @@ export const StorageService = {
   // Phase 26: Quarterly Goals
   saveQuarterlyGoal: async (title: string): Promise<void> => {
       if (!isLocalMode && supabase) {
-         const { data: { user } } = await supabase.auth.getUser();
-         if (user) {
-             const quarter = `Q${Math.floor((new Date().getMonth() + 3) / 3)} ${new Date().getFullYear()}`;
-             await supabase.from('quarterly_goals').insert({ 
-                 user_id: user.id, 
-                 title, 
-                 quarter,
-                 achieved: false 
-             });
-         }
+         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const quarter = `Q${Math.floor((new Date().getMonth() + 3) / 3)} ${new Date().getFullYear()}`;
+                await supabase.from('quarterly_goals').insert({ 
+                    user_id: user.id, 
+                    title, 
+                    quarter,
+                    achieved: false 
+                });
+            }
+         } catch(e) {}
       }
       // Simple local fallback (not full implementation for brevity)
       const data = localStorage.getItem(LOCAL_STORAGE_KEYS.GOALS);

@@ -49,6 +49,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
 
   // Helper validation logic
   const canCreateEvent = (start: Date) => {
+      if (isNaN(start.getTime())) return false;
       const now = new Date();
       // Allow 5 min tolerance for "now" events
       return start.getTime() >= (now.getTime() - 5 * 60000);
@@ -96,7 +97,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
                     setPendingAction(null);
                     return;
                 }
-                // Se não for nem Sim nem Não (ex: "Muda para as 18h"), deixa passar para a IA processar como novo comando
+                // Se não for nem Sim nem Não, deixa passar para a IA processar como novo comando
                 setPendingAction(null);
             }
             else {
@@ -176,13 +177,29 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
             const { name, args } = response.toolCall;
             
             if (name === 'create_task') {
-                const dueDate = args.dueDate ? new Date(args.dueDate) : undefined;
+                let dueDate = undefined;
+                // Robust date parsing
+                if (args.dueDate) {
+                    const parsed = new Date(args.dueDate);
+                    if (!isNaN(parsed.getTime())) {
+                        dueDate = parsed;
+                    }
+                }
+                
                 await appContext.addTask(args.title, dueDate);
-                sendAIMessage(`✅ Tarefa criada: "${args.title}"${dueDate ? ` para ${dueDate.toLocaleDateString()}` : ''}.`);
+                
+                const dateStr = dueDate ? dueDate.toLocaleDateString() : 'hoje (sem prazo definido)';
+                sendAIMessage(`✅ Tarefa criada: "${args.title}" para ${dateStr}.`);
             } 
             else if (name === 'create_event') {
                 const start = new Date(args.start);
                 
+                // --- Validation: Ensure Date is Valid ---
+                if (isNaN(start.getTime())) {
+                     sendAIMessage("Entendi que você quer criar um evento, mas a data ficou confusa. Pode repetir o horário?");
+                     return;
+                }
+
                 // --- Business Rule: Check for Past Events ---
                 if (!canCreateEvent(start)) {
                     setPendingAction({
@@ -204,8 +221,23 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
                 sendAIMessage(`📅 Evento agendado: "${args.title}" em ${start.toLocaleString()}.`);
             }
             else if (name === 'create_routine') {
-                // Mock execution for routine
-                sendAIMessage(`🔄 Rotina "${args.title}" registrada para às ${args.time}.`);
+                // Parse Time (HH:mm) into a Date for today
+                const [hours, minutes] = (args.time || "09:00").split(':').map(Number);
+                const start = new Date();
+                start.setHours(hours || 9, minutes || 0, 0, 0);
+                
+                const end = new Date(start);
+                end.setMinutes(start.getMinutes() + 30); // Default 30 min duration for routine
+
+                await appContext.addEvent({
+                    title: args.title,
+                    start: start,
+                    end: end,
+                    category: 'routine',
+                    isAllDay: false
+                });
+
+                sendAIMessage(`🔄 Rotina "${args.title}" registrada para hoje às ${args.time}.`);
             }
             else {
                 sendAIMessage(response.text);
@@ -217,7 +249,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
 
     } catch (e) {
         console.error("Maya Error:", e);
-        sendAIMessage('Desculpe, tive um problema interno. Tente reformular.');
+        sendAIMessage('Desculpe, tive um problema ao processar seu pedido. Verifique sua conexão.');
     } finally {
         setIaStatus('idle');
     }
