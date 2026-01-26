@@ -24,6 +24,7 @@ export interface Task {
   dueDate?: Date;
   priority: TaskPriority;
   description?: string;
+  teamId?: string; 
 }
 
 export interface UserProfile {
@@ -43,6 +44,19 @@ export interface UserProfile {
   defaultReminder: number;
 }
 
+// Phase 27: Company
+export interface Company {
+    id: string;
+    name: string;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  ownerId: string;
+  companyId?: string; // Phase 27
+}
+
 export interface AppSettings {
   showWeekends: boolean;
   startHour: number;
@@ -56,4 +70,44 @@ export interface TimeSuggestion {
   end: string;
   reason: string;
   confidence: number;
+}
+
+export interface IAMessage {
+  id: string;
+  sender: "user" | "maya";
+  text: string;
+  type?: 'text' | 'image' | 'audio';
+  content?: string;
+}
+
+export interface PendingAction {
+  action: any; // IAAction
+  question: string;
+  data?: any;
+}
+
+// Phase 18
+export interface Notification {
+  id: string;
+  message: string;
+  read: boolean;
+  createdAt: Date;
+}
+
+// Phase 19
+export interface ScoreHistory {
+  id: string;
+  score: number;
+  createdAt: Date;
+}
+
+// Phase 22
+export type PersonalityType = "disciplinado" | "sobrecarregado" | "neutro";
+
+// Phase 26
+export interface QuarterlyGoal {
+    id: string;
+    title: string;
+    achieved: boolean;
+    quarter: string;
 }

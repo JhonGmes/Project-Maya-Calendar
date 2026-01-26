@@ -1,7 +1,12 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Trash2 } from 'lucide-react';
-import { parseSmartCommand, generateImage, generateSpeech, chatWithMaya, editImage } from '../services/geminiService';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit } from 'lucide-react';
+import { generateImage, generateSpeech, chatWithMaya, editImage } from '../services/geminiService';
+import { processIAInput } from '../utils/iaEngine';
+import { executeIAAction } from '../utils/iaActions';
+import { adaptTone } from '../utils/personalityEngine';
 import { CalendarEvent, Task } from '../types';
+import { useApp } from '../context/AppContext';
 
 interface MayaModalProps {
   isOpen: boolean;
@@ -11,20 +16,11 @@ interface MayaModalProps {
   allEvents: CalendarEvent[];
 }
 
-interface Message {
-  id: string;
-  sender: 'user' | 'maya';
-  text: string;
-  type: 'text' | 'image' | 'audio';
-  content?: string; // URL for image/audio
-}
+export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks, allEvents }) => {
+  const appContext = useApp();
+  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality } = appContext;
 
-export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction, allTasks, allEvents }) => {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([
-    { id: '1', sender: 'maya', text: 'Olá! Sou a Maya. Posso agendar eventos, criar tarefas, gerar imagens ou editar imagens que você enviar. Como posso ajudar?', type: 'text' }
-  ]);
-  const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -33,6 +29,11 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
+  const sendAIMessage = (text: string, type: 'text' | 'image' | 'audio' = 'text', content?: string) => {
+      const adaptedText = type === 'text' ? adaptTone(text, personality) : text;
+      addMessage({ id: Date.now().toString(), sender: 'maya', text: adaptedText, type, content });
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
@@ -40,7 +41,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
           reader.onloadend = () => {
               const base64 = reader.result as string;
               setSelectedImage(base64);
-              addMessage('user', 'Imagem carregada para edição', 'image', base64);
+              addMessage({ id: Date.now().toString(), sender: 'user', text: 'Imagem carregada para edição', type: 'image', content: base64 });
           };
           reader.readAsDataURL(file);
       }
@@ -50,40 +51,64 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
     if (!input.trim() && !selectedImage) return;
     const userMsg = input;
     
+    setInput('');
     if (userMsg.trim()) {
-        addMessage('user', userMsg);
+        addMessage({ id: Date.now().toString(), sender: 'user', text: userMsg, type: 'text' });
     }
     
-    setInput('');
-    setLoading(true);
+    setIaStatus('thinking');
 
     try {
         const lower = userMsg.toLowerCase();
 
-        // Image Editing Flow (Nano Banana)
+        // 1. Pending Confirmation Actions
+        if (pendingAction) {
+            if (['sim', 'yes', 'confirmar', 'claro', 'pode'].some(word => lower.includes(word))) {
+                if (pendingAction.action.action === 'NEGOTIATE_DEADLINE') {
+                     await appContext.addTask(pendingAction.action.payload.title, pendingAction.action.payload.dueDate);
+                     sendAIMessage(`Combinado! Agendei "${pendingAction.action.payload.title}" para amanhã.`);
+                } else {
+                     await executeIAAction(pendingAction.action, appContext, (text) => sendAIMessage(text));
+                }
+                setPendingAction(null);
+                return; 
+            } 
+            if (['não', 'nao', 'no', 'cancelar'].some(word => lower.includes(word))) {
+                sendAIMessage("Entendido. Ação cancelada.");
+                setPendingAction(null);
+                return;
+            }
+            sendAIMessage(`Por favor, responda apenas com "Sim" para confirmar ou "Não" para cancelar.`);
+            return;
+        }
+
+        // 2. Image Editing
         if (selectedImage) {
              const editPrompt = userMsg || "Descreva esta imagem";
              const editedImage = await editImage(selectedImage, editPrompt);
-             
              if (editedImage) {
-                 addMessage('maya', `Aqui está o resultado da edição: "${editPrompt}"`, 'image', editedImage);
-                 setSelectedImage(null); // Clear context after edit
+                 sendAIMessage(`Aqui está o resultado: "${editPrompt}"`, 'image', editedImage);
+                 setSelectedImage(null); 
              } else {
-                 addMessage('maya', 'Não consegui editar a imagem. Tente um prompt diferente.');
+                 sendAIMessage('Não consegui editar a imagem. Tente novamente.');
              }
+             return;
         }
-        // Image Generation Flow
-        else if (lower.startsWith('gerar imagem') || lower.startsWith('crie uma imagem')) {
+
+        // 3. Image Generation
+        if (lower.startsWith('gerar imagem') || lower.startsWith('crie uma imagem')) {
             const prompt = userMsg.replace(/gerar imagem|crie uma imagem/i, '').trim();
             const imageUrl = await generateImage(prompt, "1K");
             if (imageUrl) {
-                addMessage('maya', `Aqui está a imagem que você pediu: "${prompt}"`, 'image', imageUrl);
+                sendAIMessage(`Imagem gerada: "${prompt}"`, 'image', imageUrl);
             } else {
-                addMessage('maya', 'Desculpe, não consegui gerar a imagem.');
+                sendAIMessage('Desculpe, não consegui gerar a imagem.');
             }
+            return;
         } 
-        // TTS Flow
-        else if (lower.startsWith('fale') || lower.startsWith('diga')) {
+
+        // 4. TTS
+        if (lower.startsWith('fale') || lower.startsWith('diga')) {
              const textToSpeak = userMsg.replace(/fale|diga/i, '').trim();
              const audioData = await generateSpeech(textToSpeak);
              if (audioData) {
@@ -95,34 +120,55 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
                  const byteArray = new Uint8Array(byteNumbers);
                  const blob = new Blob([byteArray], {type: 'audio/mp3'});
                  const url = URL.createObjectURL(blob);
-                 addMessage('maya', `Falando: "${textToSpeak}"`, 'audio', url);
+                 sendAIMessage(`Falando: "${textToSpeak}"`, 'audio', url);
                  new Audio(url).play();
              } else {
-                 addMessage('maya', 'Desculpe, não consegui gerar o áudio.');
+                 sendAIMessage('Erro ao gerar áudio.');
              }
+             return;
         }
-        // General Chat & Commands
-        else {
-             const command = await parseSmartCommand(userMsg);
-             if (command && command.action !== 'unknown') {
-                 onAction(command.action, command.action === 'create_task' ? command.taskData : command.eventData);
-                 addMessage('maya', `Comando reconhecido: ${command.action}. Executando...`);
-             } else {
-                 const history = messages.filter(m => m.type === 'text').map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
-                 const response = await chatWithMaya(userMsg, history);
-                 addMessage('maya', response || "Não entendi, pode repetir?");
-             }
+
+        // 5. Intelligent Chat with Tool Calling (Gemini 3 Flash)
+        const history = messages.filter(m => m.type === 'text').map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
+        const response = await chatWithMaya(userMsg, history);
+
+        if (response.toolCall) {
+            // Execute the tool requested by Gemini
+            const { name, args } = response.toolCall;
+            
+            if (name === 'create_task') {
+                const dueDate = args.dueDate ? new Date(args.dueDate) : undefined;
+                await appContext.addTask(args.title, dueDate);
+                sendAIMessage(`✅ Tarefa criada: "${args.title}"${dueDate ? ` para ${dueDate.toLocaleDateString()}` : ''}.`);
+            } 
+            else if (name === 'create_event') {
+                await appContext.addEvent({
+                    title: args.title,
+                    start: new Date(args.start),
+                    end: args.end ? new Date(args.end) : new Date(new Date(args.start).getTime() + 3600000),
+                    category: args.category || 'work',
+                    location: args.location
+                });
+                sendAIMessage(`📅 Evento agendado: "${args.title}" em ${new Date(args.start).toLocaleString()}.`);
+            }
+            else if (name === 'create_routine') {
+                // Mock execution for routine (assuming routine is just a recurring task in this demo)
+                sendAIMessage(`🔄 Rotina "${args.title}" registrada para às ${args.time}.`);
+            }
+            else {
+                sendAIMessage(response.text);
+            }
+        } else {
+            // Just a text reply
+            sendAIMessage(response.text || "Não entendi, pode repetir?");
         }
 
     } catch (e) {
-        addMessage('maya', 'Ocorreu um erro ao processar sua solicitação.');
+        console.error("Maya Error:", e);
+        sendAIMessage('Desculpe, tive um problema interno.');
     } finally {
-        setLoading(false);
+        setIaStatus('idle');
     }
-  };
-
-  const addMessage = (sender: 'user' | 'maya', text: string, type: 'text' | 'image' | 'audio' = 'text', content?: string) => {
-      setMessages(prev => [...prev, { id: Date.now().toString(), sender, text, type, content }]);
   };
 
   if (!isOpen) return null;
@@ -140,7 +186,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
                 </div>
                 <div>
                     <h3 className="font-bold dark:text-white">Maya AI</h3>
-                    <p className="text-xs text-green-500 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online</p>
+                    <p className="text-xs text-green-500 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online ({personality})</p>
                 </div>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={20} className="dark:text-white" /></button>
@@ -156,7 +202,9 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
                             ? 'bg-custom-soil text-white rounded-br-none' 
                             : 'bg-white dark:bg-zinc-800 border border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-none shadow-sm'}
                     `}>
-                        {msg.type === 'text' && <p>{msg.text}</p>}
+                        {msg.type === 'text' && (
+                            <div className="whitespace-pre-line">{msg.text}</div>
+                        )}
                         {msg.type === 'image' && msg.content && (
                             <div className="space-y-2">
                                 <p className="opacity-80 text-xs mb-1">{msg.text}</p>
@@ -166,7 +214,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
                                 )}
                                 {msg.sender === 'maya' && (
                                      <button 
-                                        onClick={() => { setSelectedImage(msg.content!); addMessage('user', 'Editando esta imagem...', 'image', msg.content); }}
+                                        onClick={() => { setSelectedImage(msg.content!); setInput("Edite: "); }}
                                         className="flex items-center gap-1 text-xs text-custom-caramel mt-2 hover:underline"
                                      >
                                         <Edit size={12} /> Editar esta imagem
@@ -183,7 +231,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
                     </div>
                 </div>
             ))}
-            {loading && (
+            {iaStatus === 'thinking' && (
                 <div className="flex justify-start">
                     <div className="bg-white dark:bg-zinc-800 p-3 rounded-2xl rounded-bl-none shadow-sm border border-gray-100 dark:border-white/5">
                         <div className="flex gap-1">
@@ -231,12 +279,12 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, onAction,
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        placeholder={selectedImage ? "Digite como editar (ex: Filtro retrô)..." : "Mensagem, comando ou 'Gerar imagem'..."}
+                        placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "Digite como editar..." : "Mensagem ou comando...")}
                         className="w-full bg-gray-100 dark:bg-black/50 border-none rounded-full py-3 pl-4 pr-12 focus:ring-2 focus:ring-custom-caramel/50 dark:text-white"
                     />
                     <button 
                         onClick={handleSend}
-                        disabled={(!input.trim() && !selectedImage) || loading}
+                        disabled={(!input.trim() && !selectedImage) || iaStatus === 'thinking'}
                         className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-custom-soil text-white rounded-full hover:bg-custom-caramel disabled:opacity-50 transition-colors"
                     >
                         <Send size={16} />

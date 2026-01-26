@@ -1,6 +1,8 @@
+
 import React from 'react';
 import { ViewMode } from '../types';
-import { Calendar, CheckSquare, List, Sun, Settings, LogOut, LayoutDashboard, X } from 'lucide-react';
+import { Calendar, CheckSquare, List, Sun, Settings, LogOut, LayoutDashboard, X, Bell, Wifi, WifiOff, Cloud, Database } from 'lucide-react';
+import { useApp } from '../context/AppContext';
 
 interface SidebarProps {
   currentView: ViewMode;
@@ -12,9 +14,11 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onLogout, onOpenSettings, isOpenMobile, setIsOpenMobile }) => {
+  const { unreadNotifications, isSupabaseConnected } = useApp();
+  
   const menuItems = [
     { id: 'day', label: 'Hoje', icon: LayoutDashboard },
-    { id: 'week', label: 'Semana', icon: List }, // Simplified as list for now
+    { id: 'week', label: 'Semana', icon: List }, 
     { id: 'month', label: 'Mês', icon: Calendar },
     { id: 'tasks', label: 'Tarefas', icon: CheckSquare },
     { id: 'routine', label: 'Rotina', icon: Sun },
@@ -28,7 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onL
       )}
 
       <aside className={`
-        fixed md:static inset-y-0 left-0 z-50 w-64 bg-white/80 dark:bg-zinc-900/90 backdrop-blur-xl border-r border-white/20 dark:border-white/5 shadow-2xl md:shadow-none transform transition-transform duration-300 ease-in-out
+        fixed md:static inset-y-0 left-0 z-50 w-64 bg-white/80 dark:bg-zinc-900/90 backdrop-blur-xl border-r border-white/20 dark:border-white/5 shadow-2xl md:shadow-none transform transition-transform duration-300 ease-in-out flex flex-col justify-between
         ${isOpenMobile ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
         <div className="flex flex-col h-full p-6">
@@ -57,6 +61,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onL
           </nav>
 
           <div className="pt-6 border-t border-gray-200 dark:border-white/10 space-y-2">
+             {/* Notifications Trigger (Phase 18) */}
+             <button 
+              className="w-full flex items-center gap-3 px-4 py-3 text-gray-600 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-white/5 rounded-xl transition-colors relative"
+            >
+              <Bell size={20} />
+              <span>Notificações</span>
+              {unreadNotifications > 0 && (
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold">
+                      {unreadNotifications}
+                  </span>
+              )}
+            </button>
+
             <button 
               onClick={onOpenSettings}
               className="w-full flex items-center gap-3 px-4 py-3 text-gray-600 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-white/5 rounded-xl transition-colors"
@@ -72,6 +89,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onL
               <span>Sair</span>
             </button>
           </div>
+        </div>
+
+        {/* Status Footer */}
+        <div className="p-4 bg-gray-50/50 dark:bg-black/20 border-t border-gray-200 dark:border-white/5">
+            <div className="flex items-center gap-3">
+                <div className={`w-2 h-2 rounded-full ${isSupabaseConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                <div className="flex-1">
+                    <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Status da Rede</p>
+                    <p className={`text-xs font-medium flex items-center gap-1 ${isSupabaseConnected ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>
+                        {isSupabaseConnected ? (
+                            <><Cloud size={10} /> Conectado (Supabase)</>
+                        ) : (
+                            <><WifiOff size={10} /> Modo Local</>
+                        )}
+                    </p>
+                </div>
+                {isSupabaseConnected && <Database size={14} className="text-gray-300 dark:text-gray-600" />}
+            </div>
         </div>
       </aside>
     </>

@@ -1,8 +1,12 @@
+
 import React from 'react';
 import { CalendarEvent, Task } from '../types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Clock, CheckCircle2, Circle, AlertCircle, Plus, Sparkles } from 'lucide-react';
+import { Clock, CheckCircle2, Circle, AlertCircle, Plus, Sparkles, Trophy, Target, ArrowRight, WifiOff, CloudCheck } from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import { getScoreLevel } from '../utils/productivityScore';
+import { ProductivityChart } from './ProductivityChart';
 
 interface DashboardProps {
   events: CalendarEvent[];
@@ -13,13 +17,15 @@ interface DashboardProps {
   onConvertTaskToEvent: (task: Task) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClick, onAddTask }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClick, onAddTask, onToggleTask }) => {
+  const { productivityScore, scoreHistory, dailyFocus, setMayaOpen, addMessage, isSupabaseConnected, isAuthenticated } = useApp();
   const today = new Date();
   const todayEvents = events.filter(e => 
     new Date(e.start).toDateString() === today.toDateString()
   ).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
   const pendingTasks = tasks.filter(t => !t.completed).slice(0, 5);
+  const scoreLevel = getScoreLevel(productivityScore);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -28,16 +34,85 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
     return 'Boa noite';
   };
 
+  const startCoaching = () => {
+     setMayaOpen(true);
+     addMessage({
+         id: Date.now().toString(),
+         sender: 'maya',
+         text: `Ótima escolha! Vamos focar em "${dailyFocus?.title}". O que você precisa fazer primeiro para começar?`
+     });
+  };
+
   return (
     <div className="h-full overflow-y-auto p-6 md:p-10 scrollbar-hide">
-      <header className="mb-8">
-        <h2 className="text-4xl font-serif font-bold text-custom-soil dark:text-white mb-2 animate-slide-up">
-          {getGreeting()}, <span className="opacity-60">Usuário</span>
-        </h2>
-        <p className="text-gray-500 dark:text-gray-400 animate-slide-up" style={{animationDelay: '0.1s'}}>
-          {format(today, "EEEE, d 'de' MMMM", { locale: ptBR })}
-        </p>
+      
+      {/* Connection Warning Banner */}
+      {!isSupabaseConnected && isAuthenticated && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-3 animate-fade-in">
+            <WifiOff className="text-red-500" size={20} />
+            <div>
+                <h4 className="text-sm font-bold text-red-500">Supabase Desconectado</h4>
+                <p className="text-xs text-red-400">Não foi possível conectar ao banco de dados. Dados podem não ser salvos. Verifique o console.</p>
+            </div>
+        </div>
+      )}
+
+      <header className="mb-8 flex justify-between items-end">
+        <div>
+            <h2 className="text-4xl font-serif font-bold text-custom-soil dark:text-white mb-2 animate-slide-up">
+            {getGreeting()}, <span className="opacity-60">Usuário</span>
+            </h2>
+            <div className="flex items-center gap-2 animate-slide-up" style={{animationDelay: '0.1s'}}>
+                <p className="text-gray-500 dark:text-gray-400">
+                {format(today, "EEEE, d 'de' MMMM", { locale: ptBR })}
+                </p>
+                {isSupabaseConnected && (
+                    <span className="px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-[10px] font-bold flex items-center gap-1">
+                        <CloudCheck size={10} /> Online
+                    </span>
+                )}
+            </div>
+        </div>
+        
+        {/* Productivity Score Card */}
+        <div className="hidden md:flex flex-col items-end gap-2 animate-slide-up">
+            <div className="flex items-center gap-3 bg-white/60 dark:bg-white/5 backdrop-blur px-4 py-2 rounded-2xl border border-white/50 dark:border-white/10 shadow-sm">
+                <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-full text-yellow-600 dark:text-yellow-400">
+                    <Trophy size={20} />
+                </div>
+                <div>
+                    <p className="text-[10px] uppercase text-gray-500 font-bold tracking-wider">Produtividade</p>
+                    <div className="flex items-baseline gap-1">
+                        <span className="text-xl font-bold text-custom-soil dark:text-white">{productivityScore}</span>
+                        <span className="text-xs text-gray-400 font-medium">pts ({scoreLevel})</span>
+                    </div>
+                </div>
+            </div>
+        </div>
       </header>
+
+      {/* Phase 20: Daily Focus Card */}
+      {dailyFocus && !dailyFocus.completed && (
+          <div className="mb-8 p-1 rounded-3xl bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 animate-slide-up">
+             <div className="bg-white dark:bg-zinc-900 rounded-[22px] p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+                 <div className="flex items-center gap-4">
+                     <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400">
+                         <Target size={24} />
+                     </div>
+                     <div>
+                         <h3 className="text-sm font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">Modo Foco Diário</h3>
+                         <p className="text-xl font-medium dark:text-white">{dailyFocus.title}</p>
+                     </div>
+                 </div>
+                 <button 
+                    onClick={startCoaching}
+                    className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold transition-all shadow-lg hover:shadow-purple-500/30"
+                 >
+                     <Sparkles size={16} /> Focar Agora <ArrowRight size={16} />
+                 </button>
+             </div>
+          </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Timeline Section */}
@@ -87,8 +162,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
             </div>
         </div>
 
-        {/* Right Column: Quick Tasks & AI Suggestions */}
+        {/* Right Column: Charts, Quick Tasks */}
         <div className="space-y-8">
+            
+            {/* Phase 19: History Chart */}
+            <div className="glass-panel p-6 rounded-3xl">
+                <h3 className="font-medium dark:text-gray-200 mb-4">Evolução Semanal</h3>
+                <ProductivityChart data={scoreHistory} />
+            </div>
+
             {/* Quick Tasks */}
             <div className="glass-panel p-6 rounded-3xl">
                 <div className="flex items-center justify-between mb-6">
@@ -98,7 +180,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
                 <ul className="space-y-3">
                     {pendingTasks.map((task) => (
                         <li key={task.id} className="flex items-center gap-3 p-3 bg-white/40 dark:bg-white/5 rounded-xl hover:bg-white/60 transition-colors group">
-                            <button className="text-gray-400 hover:text-green-500 transition-colors">
+                            <button 
+                                onClick={() => onToggleTask(task.id)}
+                                className="text-gray-400 hover:text-green-500 transition-colors"
+                            >
                                 <Circle size={18} />
                             </button>
                             <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">{task.title}</span>
@@ -107,25 +192,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
                     ))}
                     {pendingTasks.length === 0 && <li className="text-sm text-gray-400 text-center py-4">Tudo limpo!</li>}
                 </ul>
-            </div>
-
-            {/* AI Insight Card */}
-            <div className="bg-gradient-to-br from-custom-soil to-zinc-800 p-6 rounded-3xl text-white relative overflow-hidden shadow-xl">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                    <Sparkles size={100} />
-                </div>
-                <div className="relative z-10">
-                    <div className="flex items-center gap-2 mb-4 text-custom-tan">
-                        <Sparkles size={18} />
-                        <span className="text-xs font-bold tracking-widest uppercase">Maya Insight</span>
-                    </div>
-                    <p className="text-lg font-serif italic opacity-90 mb-4">
-                        "Seu período da tarde está livre. Que tal adiantar o projeto de Design?"
-                    </p>
-                    <button className="text-xs font-bold bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg backdrop-blur-sm transition-colors border border-white/10">
-                        VER SUGESTÕES
-                    </button>
-                </div>
             </div>
         </div>
       </div>

@@ -1,38 +1,44 @@
+
 import React, { useState } from 'react';
-import { supabase } from '../services/supabaseClient';
-import { StorageService } from '../services/storage';
-import { Lock, Mail, WifiOff, ArrowRight, Calendar, CheckCircle, Clock, Search, MapPin, Bell, Video, Cpu, Square, CheckSquare as CheckSquareIcon } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Lock, Mail, WifiOff, ArrowRight, Calendar, CheckCircle, Clock, Search, MapPin, Bell, Video, Cpu, Square, CheckSquare as CheckSquareIcon, UserPlus, LogIn } from 'lucide-react';
 
-interface LoginProps {
-  onLogin: () => void;
-}
-
-export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+export const Login: React.FC = () => {
+  const { signIn, signUp, setLocalMode } = useAuth();
+  
+  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [rememberMe, setRememberMe] = useState(false);
 
-  const handleSupabaseLogin = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
+
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      StorageService.setLocalMode(false);
-      onLogin();
+      if (isSignUp) {
+        // Sign Up Logic
+        await signUp(email, password);
+        setSuccessMsg("Conta criada! Você já pode entrar.");
+        setIsSignUp(false); // Switch back to login
+      } else {
+        // Sign In Logic
+        await signIn(email, password);
+      }
     } catch (err: any) {
-      setError(err.message || 'Erro ao entrar. Verifique suas credenciais.');
+      setError(err.message || 'Erro de autenticação. Tente novamente.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleOfflineLogin = () => {
-    StorageService.setLocalMode(true);
-    onLogin();
+    setLocalMode(true);
   };
 
   return (
@@ -87,12 +93,15 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                    <div className="absolute -left-6 top-1.5 bottom-1.5 w-1 bg-cyan-500 rounded-full hidden md:block"></div>
                    {/* Reduced Text Size */}
                    <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-1 tracking-tight text-white font-sans">Maya Calendar<span className="text-cyan-400">.AI</span></h1>
-                   <h2 className="text-sm md:text-base text-gray-400 font-medium tracking-wide">Acessar Sistema</h2>
+                   <h2 className="text-sm md:text-base text-gray-400 font-medium tracking-wide">
+                       {isSignUp ? 'Criar Nova Identidade' : 'Acessar Sistema'}
+                   </h2>
                 </div>
 
                 {error && <div className="mb-6 p-3 bg-red-950/30 border border-red-900/50 text-red-200 text-xs rounded-lg backdrop-blur-sm flex items-center gap-2 animate-fade-in"><Lock size={12} /> {error}</div>}
+                {successMsg && <div className="mb-6 p-3 bg-green-950/30 border border-green-900/50 text-green-200 text-xs rounded-lg backdrop-blur-sm flex items-center gap-2 animate-fade-in"><CheckCircle size={12} /> {successMsg}</div>}
 
-                <form onSubmit={handleSupabaseLogin} className="space-y-3.5 max-w-sm w-full relative z-20 mx-auto md:mx-0">
+                <form onSubmit={handleAuth} className="space-y-3.5 max-w-sm w-full relative z-20 mx-auto md:mx-0">
                     
                     {/* Identity Input */}
                     <div className="space-y-1.5 group text-left">
@@ -133,14 +142,16 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     </div>
 
                     {/* Checkbox */}
-                    <div className="flex items-center gap-2 cursor-pointer mt-1" onClick={() => setRememberMe(!rememberMe)}>
-                        {rememberMe ? (
-                            <CheckSquareIcon className="w-3.5 h-3.5 text-cyan-500" />
-                        ) : (
-                            <Square className="w-3.5 h-3.5 text-cyan-900" />
-                        )}
-                        <span className="text-[9px] uppercase tracking-widest text-cyan-700 font-bold">Lembrar meu email</span>
-                    </div>
+                    {!isSignUp && (
+                        <div className="flex items-center gap-2 cursor-pointer mt-1" onClick={() => setRememberMe(!rememberMe)}>
+                            {rememberMe ? (
+                                <CheckSquareIcon className="w-3.5 h-3.5 text-cyan-500" />
+                            ) : (
+                                <Square className="w-3.5 h-3.5 text-cyan-900" />
+                            )}
+                            <span className="text-[9px] uppercase tracking-widest text-cyan-700 font-bold">Lembrar meu email</span>
+                        </div>
+                    )}
 
                     {/* Submit Button */}
                     <button 
@@ -148,23 +159,37 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                         disabled={loading}
                         className="w-full py-3 bg-[#020817] border border-cyan-500/50 text-white font-bold rounded-lg hover:bg-cyan-500/10 hover:border-cyan-400 hover:shadow-[0_0_20px_rgba(6,182,212,0.1)] transition-all duration-300 flex items-center justify-center gap-3 group mt-4 relative overflow-hidden active:scale-[0.98]"
                     >
-                        <span className="relative z-10 font-mono uppercase tracking-[0.15em] text-[10px]">Entrar no Sistema</span>
+                        <span className="relative z-10 font-mono uppercase tracking-[0.15em] text-[10px]">
+                            {loading ? 'Processando...' : (isSignUp ? 'Registrar Identidade' : 'Entrar no Sistema')}
+                        </span>
                         <ArrowRight className="relative z-10 w-3.5 h-3.5 text-cyan-400 group-hover:translate-x-1 transition-transform" />
                     </button>
                     
-                    {/* Offline Button */}
-                     <button 
-                        type="button"
-                        onClick={handleOfflineLogin}
-                        className="w-full py-2.5 bg-transparent border border-dashed border-gray-800 text-gray-600 rounded-lg hover:text-cyan-600 hover:border-cyan-900 transition-all flex items-center justify-center gap-2 text-[9px] font-mono uppercase tracking-widest mt-2 active:bg-gray-900/50"
-                    >
-                        <WifiOff className="w-3 h-3" /> Entrar Offline (Modo Local)
-                    </button>
+                    {/* Offline Button (Only on Login) */}
+                    {!isSignUp && (
+                        <button 
+                            type="button"
+                            onClick={handleOfflineLogin}
+                            className="w-full py-2.5 bg-transparent border border-dashed border-gray-800 text-gray-600 rounded-lg hover:text-cyan-600 hover:border-cyan-900 transition-all flex items-center justify-center gap-2 text-[9px] font-mono uppercase tracking-widest mt-2 active:bg-gray-900/50"
+                        >
+                            <WifiOff className="w-3 h-3" /> Entrar Offline (Modo Local)
+                        </button>
+                    )}
 
                     <div className="w-full flex items-center justify-center gap-3 mt-6 pt-4 border-t border-gray-900/50">
-                         <span className="text-cyan-800 text-[10px]">Não possui acesso?</span>
-                         <button className="text-cyan-500 text-[10px] font-bold hover:underline flex items-center gap-1">
-                            Criar uma conta <ArrowRight size={10} />
+                         <span className="text-cyan-800 text-[10px]">
+                             {isSignUp ? 'Já possui acesso?' : 'Não possui acesso?'}
+                         </span>
+                         <button 
+                            type="button"
+                            onClick={() => { setIsSignUp(!isSignUp); setError(null); setSuccessMsg(null); }}
+                            className="text-cyan-500 text-[10px] font-bold hover:underline flex items-center gap-1"
+                         >
+                            {isSignUp ? (
+                                <>Entrar Agora <LogIn size={10} /></>
+                            ) : (
+                                <>Criar uma conta <UserPlus size={10} /></>
+                            )}
                          </button>
                     </div>
                 </form>

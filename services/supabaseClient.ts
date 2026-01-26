@@ -1,8 +1,17 @@
+
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = 'https://gcclvmmgfocwmdugetgl.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdjY2x2bW1nZm9jd21kdWdldGdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc4NzkxMTAsImV4cCI6MjA4MzQ1NTExMH0.KYnOXwryMN596_mNfspx5XYRaQzZ728NPKm4CgtobpY';
+// Access env variables safely handling TypeScript errors if types are missing
+const env = (import.meta as any).env || {};
 
-console.log('✅ Supabase Client Initialized with provided keys');
+// Prioritize environment variables, fallback to hardcoded keys provided by user
+const SUPABASE_URL = env.VITE_SUPABASE_URL || 'https://xukbtfipvdxtobtsidum.supabase.co';
+const SUPABASE_KEY = env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh1a2J0ZmlwdmR4dG9idHNpZHVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc2MTcyOTQsImV4cCI6MjA4MzE5MzI5NH0.uhYVcAh9Ea17IUeW5-K4CigXDjcfzqwuz3SRJp_QmeU';
+
+console.log('✅ Supabase Client Initialized');
+
+if (!env.VITE_SUPABASE_URL) {
+    console.log('ℹ️ Usando chaves de conexão direta (Hardcoded).');
+}
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);

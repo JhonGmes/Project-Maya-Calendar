@@ -1,12 +1,77 @@
 
-import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
+import { GoogleGenAI, Type, Schema, Modality, FunctionDeclaration, Tool } from "@google/genai";
 import { CalendarEvent, Task, TimeSuggestion } from "../types";
 
-// Helper to get AI instance - always creates new to ensure fresh API key usage
+// --- ENVIRONMENT SHIM ---
+try {
+  if (typeof process === "undefined") {
+    (window as any).process = { env: {} };
+  }
+  if (!process.env) {
+    (window as any).process.env = {};
+  }
+  const viteEnv = (import.meta as any).env || {};
+  if (!process.env.API_KEY) {
+    process.env.API_KEY = viteEnv.VITE_GEMINI_API_KEY || viteEnv.VITE_API_KEY || viteEnv.VITE_GOOGLE_API_KEY || '';
+  }
+} catch (e) {
+  console.warn("Erro ao configurar ambiente:", e);
+}
+// ------------------------
+
 const getAI = () => {
-  // API key must be obtained exclusively from process.env.API_KEY
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 }
+
+// --- TOOL DEFINITIONS ---
+const taskTool: FunctionDeclaration = {
+    name: 'create_task',
+    description: 'Create a new task or to-do item in the user\'s list.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            title: { type: Type.STRING, description: "Title of the task" },
+            dueDate: { type: Type.STRING, description: "ISO 8601 date string for the deadline (e.g. 2023-12-25T15:00:00). Calculate based on user prompt relative to now." },
+            priority: { type: Type.STRING, enum: ['high', 'medium', 'low'] }
+        },
+        required: ['title']
+    }
+};
+
+const eventTool: FunctionDeclaration = {
+    name: 'create_event',
+    description: 'Schedule a new event, meeting, or appointment in the calendar.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            title: { type: Type.STRING, description: "Title of the event" },
+            start: { type: Type.STRING, description: "ISO 8601 start date time" },
+            end: { type: Type.STRING, description: "ISO 8601 end date time. Usually 1 hour after start if not specified." },
+            category: { type: Type.STRING, enum: ['work', 'personal', 'meeting', 'routine', 'health'] },
+            location: { type: Type.STRING }
+        },
+        required: ['title', 'start', 'end']
+    }
+};
+
+const routineTool: FunctionDeclaration = {
+    name: 'create_routine',
+    description: 'Add a recurring routine habit.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            title: { type: Type.STRING },
+            time: { type: Type.STRING, description: "Time of day (HH:mm)" }
+        },
+        required: ['title']
+    }
+};
+
+const appTools: Tool[] = [
+    { functionDeclarations: [taskTool, eventTool, routineTool] }
+];
+
+// --- EXISTING HELPERS (Keep as is, mostly) ---
 
 const commandSchema: Schema = {
   type: Type.OBJECT,
@@ -31,7 +96,10 @@ export const parseSmartCommand = async (input: string, referenceDate: Date = new
       },
     });
     return response.text ? JSON.parse(response.text) : null;
-  } catch (error) { return null; }
+  } catch (error) { 
+      console.error("Erro no comando inteligente:", error);
+      return null; 
+  }
 };
 
 export const suggestOptimalTimes = async (
@@ -43,11 +111,9 @@ export const suggestOptimalTimes = async (
 ): Promise<TimeSuggestion[]> => {
   try {
     const ai = getAI();
-    
-    // Filter events to only send relevant context (e.g., surrounding days) to save tokens/latency
     const relevantEvents = events.filter(e => {
        const diff = Math.abs(new Date(e.start).getTime() - referenceDate.getTime());
-       return diff < 172800000; // within 2 days
+       return diff < 172800000; 
     }).map(e => ({ start: e.start, end: e.end, title: e.title }));
 
     const prompt = `
@@ -55,12 +121,7 @@ export const suggestOptimalTimes = async (
       Reference Date: ${referenceDate.toISOString()}.
       Working Hours: ${workingHours.start} to ${workingHours.end}.
       Existing Events: ${JSON.stringify(relevantEvents)}.
-      
-      Rules:
-      1. Avoid overlaps.
-      2. Prioritize working hours.
-      3. Suggest times near the reference date.
-      4. Provide a brief reason (e.g., "Free block in morning").
+      Rules: Avoid overlaps. Prioritize working hours. Suggest times near reference date.
     `;
 
     const response = await ai.models.generateContent({
@@ -73,8 +134,8 @@ export const suggestOptimalTimes = async (
           items: {
             type: Type.OBJECT,
             properties: {
-              start: { type: Type.STRING, description: "ISO Date string" },
-              end: { type: Type.STRING, description: "ISO Date string" },
+              start: { type: Type.STRING },
+              end: { type: Type.STRING },
               reason: { type: Type.STRING },
               confidence: { type: Type.NUMBER }
             }
@@ -82,87 +143,29 @@ export const suggestOptimalTimes = async (
         }
       }
     });
-
-    return response.text ? JSON.parse(response.text) : [];
-  } catch (error) {
-    console.error("Scheduling Error", error);
-    return [];
-  }
-};
-
-export const optimizeSchedule = async (tasks: Task[], existingEvents: CalendarEvent[]) => {
-  try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: `Otimize: Tarefas ${JSON.stringify(tasks)}, Eventos ${JSON.stringify(existingEvents)}`,
-      config: { thinkingConfig: { thinkingBudget: 32768 }, responseMimeType: "application/json" }
-    });
     return response.text ? JSON.parse(response.text) : [];
   } catch (error) { return []; }
 };
 
-export const generatePresentation = async (topic: string) => {
-  try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: `Gere apresentação JSON sobre: ${topic}. Inclua: topic, slides [{title, bullets[], speakerNotes, imagePrompt}]`,
-      config: { responseMimeType: "application/json" }
-    });
-    return response.text ? JSON.parse(response.text) : null;
-  } catch (error) { return null; }
-};
-
-export const generateSpeech = async (text: string): Promise<string | null> => {
-    try {
-        const ai = getAI();
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text }] }],
-            config: {
-                responseModalities: [Modality.AUDIO],
-                speechConfig: {
-                    voiceConfig: {
-                        prebuiltVoiceConfig: { voiceName: 'Kore' },
-                    },
-                },
-            },
-        });
-        return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-    } catch (error) {
-        console.error("TTS Error", error);
-        return null;
-    }
-}
-
 export const generateImage = async (prompt: string, size: "1K" | "2K" | "4K" = "1K"): Promise<string | null> => {
     try {
-        // Enforce API key selection for gemini-3-pro-image-preview as per guidelines
         if (typeof window !== 'undefined' && (window as any).aistudio) {
             const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-            if (!hasKey) {
-                await (window as any).aistudio.openSelectKey();
-            }
+            if (!hasKey) await (window as any).aistudio.openSelectKey();
         }
 
         const ai = getAI();
-        // Uses 3-pro for high quality image generation and size support
         const response = await ai.models.generateContent({
             model: 'gemini-3-pro-image-preview',
             contents: { parts: [{ text: prompt }] },
-            config: {
-                imageConfig: { imageSize: size }
-            },
+            config: { imageConfig: { imageSize: size } },
         });
         
         for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-                return `data:image/png;base64,${part.inlineData.data}`;
-            }
+            if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
         }
         return null;
-    } catch (error) {
+    } catch (error: any) {
         console.error("Image Gen Error", error);
         return null;
     }
@@ -171,7 +174,6 @@ export const generateImage = async (prompt: string, size: "1K" | "2K" | "4K" = "
 export const editImage = async (base64Image: string, prompt: string): Promise<string | null> => {
     try {
         const ai = getAI();
-        // Uses gemini-2.5-flash-image for editing tasks as requested (Nano banana)
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
             contents: {
@@ -183,9 +185,7 @@ export const editImage = async (base64Image: string, prompt: string): Promise<st
         });
 
         for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-                return `data:image/png;base64,${part.inlineData.data}`;
-            }
+            if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
         }
         return null;
     } catch (error) {
@@ -194,37 +194,79 @@ export const editImage = async (base64Image: string, prompt: string): Promise<st
     }
 }
 
-export const chatWithMaya = async (message: string, history: any[] = []) => {
+export const generateSpeech = async (text: string): Promise<string | null> => {
+    try {
+        const ai = getAI();
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash-preview-tts",
+            contents: [{ parts: [{ text }] }],
+            config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
+            },
+        });
+        return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+    } catch (error) { return null; }
+}
+
+// --- UPDATED CHAT FUNCTION ---
+
+export interface ChatResponse {
+    text: string;
+    toolCall?: {
+        name: string;
+        args: any;
+    };
+}
+
+export const chatWithMaya = async (message: string, history: any[] = []): Promise<ChatResponse> => {
   try {
     const ai = getAI();
     const chat = ai.chats.create({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview', 
       history: history,
       config: {
-         systemInstruction: "You are Maya, a helpful and efficient AI assistant for managing schedules and tasks. If the user asks to edit an image, instruct them to upload it first.",
-         tools: [{ googleSearch: {} }] 
+         systemInstruction: `You are Maya, an efficient AI assistant for managing schedules. 
+         Current Time: ${new Date().toISOString()}.
+         Always use the provided tools to perform actions like creating tasks or events. 
+         Do not just say you will do it, actually call the function.
+         For events "tomorrow" or "today", calculate the ISO date based on Current Time.`,
+         tools: appTools,
       }
     });
+
     const result = await chat.sendMessage({ message });
     
+    // Check for function calls
+    const functionCalls = result.functionCalls;
+    if (functionCalls && functionCalls.length > 0) {
+        const call = functionCalls[0];
+        return {
+            text: "Certo, processando seu pedido...",
+            toolCall: {
+                name: call.name,
+                args: call.args
+            }
+        };
+    }
+
+    // Standard text response
     let text = result.text;
     
-    // Extract grounding sources if available
+    // Check grounding
     const groundingMetadata = result.candidates?.[0]?.groundingMetadata;
     if (groundingMetadata?.groundingChunks) {
         const sources = groundingMetadata.groundingChunks
             .map((chunk: any) => chunk.web?.uri)
             .filter((uri: string) => uri)
             .join('\n');
-            
-        if (sources) {
-            text += `\n\nSources:\n${sources}`;
-        }
+        if (sources) text += `\n\nSources:\n${sources}`;
     }
     
-    return text;
+    return { text };
+
   } catch (error) {
     console.error("Chat Error", error);
-    return "Desculpe, estou tendo dificuldades para me conectar agora.";
+    return { text: "Desculpe, tive um problema de conexão. Verifique sua chave API." };
   }
 }
