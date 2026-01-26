@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, Schema, Modality, FunctionDeclaration, Tool } from "@google/genai";
+import { GoogleGenAI, Type, Schema, Modality, FunctionDeclaration, Tool, Content } from "@google/genai";
 import { CalendarEvent, Task, TimeSuggestion } from "../types";
 
 // --- ENVIRONMENT SHIM ---
@@ -11,6 +11,8 @@ try {
     (window as any).process.env = {};
   }
   const viteEnv = (import.meta as any).env || {};
+  
+  // Prioritize VITE_ prefixed keys for production/vercel support
   if (!process.env.API_KEY) {
     process.env.API_KEY = viteEnv.VITE_GEMINI_API_KEY || viteEnv.VITE_API_KEY || viteEnv.VITE_GOOGLE_API_KEY || '';
   }
@@ -20,6 +22,9 @@ try {
 // ------------------------
 
 const getAI = () => {
+  if (!process.env.API_KEY) {
+      console.error("CRITICAL: Gemini API Key is missing.");
+  }
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 }
 
@@ -71,7 +76,7 @@ const appTools: Tool[] = [
     { functionDeclarations: [taskTool, eventTool, routineTool] }
 ];
 
-// --- EXISTING HELPERS (Keep as is, mostly) ---
+// --- EXISTING HELPERS ---
 
 const commandSchema: Schema = {
   type: Type.OBJECT,
@@ -90,7 +95,7 @@ export const parseSmartCommand = async (input: string, referenceDate: Date = new
       model: 'gemini-3-flash-preview',
       contents: input,
       config: {
-        systemInstruction: `Data Ref: ${referenceDate.toISOString()}. Retorne JSON.`,
+        systemInstruction: `Data Ref: ${referenceDate.toLocaleString("pt-BR")}. Retorne JSON.`,
         responseMimeType: "application/json",
         responseSchema: commandSchema,
       },
@@ -118,7 +123,7 @@ export const suggestOptimalTimes = async (
 
     const prompt = `
       Suggest 3 optimal time slots for a ${durationMinutes}-minute event titled "${title}".
-      Reference Date: ${referenceDate.toISOString()}.
+      Reference Date: ${referenceDate.toLocaleString("pt-BR")}.
       Working Hours: ${workingHours.start} to ${workingHours.end}.
       Existing Events: ${JSON.stringify(relevantEvents)}.
       Rules: Avoid overlaps. Prioritize working hours. Suggest times near reference date.
@@ -219,18 +224,51 @@ export interface ChatResponse {
     };
 }
 
+// Clean history to remove empty messages which cause Gemini 400 Errors
+function cleanHistory(history: any[]): Content[] {
+    const cleaned: Content[] = [];
+    let lastRole = '';
+
+    for (const msg of history) {
+        // Skip empty messages
+        if (!msg.parts || msg.parts.length === 0 || !msg.parts[0].text || msg.parts[0].text.trim() === '') {
+            continue;
+        }
+
+        // Ensure alternating roles (User -> Model -> User)
+        if (msg.role === lastRole) {
+            continue; // Skip duplicate role to prevent 400 error
+        }
+
+        cleaned.push({
+            role: msg.role,
+            parts: [{ text: msg.parts[0].text }]
+        });
+        lastRole = msg.role;
+    }
+    return cleaned;
+}
+
 export const chatWithMaya = async (message: string, history: any[] = []): Promise<ChatResponse> => {
   try {
     const ai = getAI();
+    
+    // Validate API Key presence
+    if (!process.env.API_KEY) {
+        throw new Error("API Key is missing. Check .env file.");
+    }
+
+    const validHistory = cleanHistory(history);
+
     const chat = ai.chats.create({
       model: 'gemini-3-flash-preview', 
-      history: history,
+      history: validHistory,
       config: {
-         systemInstruction: `You are Maya, an efficient AI assistant for managing schedules. 
-         Current Time: ${new Date().toISOString()}.
-         Always use the provided tools to perform actions like creating tasks or events. 
-         Do not just say you will do it, actually call the function.
-         For events "tomorrow" or "today", calculate the ISO date based on Current Time.`,
+         // Using toLocaleString to give Gemini context of User's Local Time (e.g. Brazil GMT-3)
+         systemInstruction: `You are Maya, an efficient AI assistant. 
+         Current Time: ${new Date().toLocaleString("pt-BR")}.
+         Use tools to create events/tasks.
+         Important: If the user asks for an event in the past, DO NOT call the tool immediately. Ask for confirmation first.`,
          tools: appTools,
       }
     });
@@ -242,7 +280,7 @@ export const chatWithMaya = async (message: string, history: any[] = []): Promis
     if (functionCalls && functionCalls.length > 0) {
         const call = functionCalls[0];
         return {
-            text: "Certo, processando seu pedido...",
+            text: "Processando...",
             toolCall: {
                 name: call.name,
                 args: call.args
@@ -265,8 +303,12 @@ export const chatWithMaya = async (message: string, history: any[] = []): Promis
     
     return { text };
 
-  } catch (error) {
-    console.error("Chat Error", error);
-    return { text: "Desculpe, tive um problema de conexão. Verifique sua chave API." };
+  } catch (error: any) {
+    console.error("Chat Error Details:", error);
+    // Return a friendly error that the UI can display
+    if (error.message.includes("API Key")) {
+        return { text: "Erro: Chave de API não configurada no ambiente." };
+    }
+    return { text: "Desculpe, tive um problema de conexão. Tente reformular sua frase." };
   }
 }

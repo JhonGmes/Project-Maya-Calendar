@@ -47,6 +47,13 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
       }
   };
 
+  // Helper validation logic
+  const canCreateEvent = (start: Date) => {
+      const now = new Date();
+      // Allow 5 min tolerance for "now" events
+      return start.getTime() >= (now.getTime() - 5 * 60000);
+  };
+
   const handleSend = async () => {
     if (!input.trim() && !selectedImage) return;
     const userMsg = input;
@@ -59,27 +66,59 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
     setIaStatus('thinking');
 
     try {
-        const lower = userMsg.toLowerCase();
+        const lower = userMsg.toLowerCase().trim();
 
-        // 1. Pending Confirmation Actions
+        // 1. Pending Confirmation Actions (Negociação)
         if (pendingAction) {
-            if (['sim', 'yes', 'confirmar', 'claro', 'pode'].some(word => lower.includes(word))) {
-                if (pendingAction.action.action === 'NEGOTIATE_DEADLINE') {
-                     await appContext.addTask(pendingAction.action.payload.title, pendingAction.action.payload.dueDate);
-                     sendAIMessage(`Combinado! Agendei "${pendingAction.action.payload.title}" para amanhã.`);
-                } else {
-                     await executeIAAction(pendingAction.action, appContext, (text) => sendAIMessage(text));
+            
+            // Check for strict "Yes" - e.g. "Sim", "Confirmar"
+            const isYes = ['sim', 'yes', 'confirmar', 'claro'].some(w => lower === w || lower.startsWith(w + ' ') || lower.endsWith(' ' + w));
+            
+            // Check for strict "No" - e.g. "Não", "Cancelar"
+            const isNo = ['não', 'nao', 'no', 'cancelar'].some(w => lower === w || lower.startsWith(w + ' '));
+
+            // Logica para confirmar evento passado
+            if (pendingAction.question === 'CONFIRM_PAST_EVENT') {
+                if (isYes) {
+                    const data = pendingAction.data;
+                    await appContext.addEvent({
+                        title: data.title,
+                        start: new Date(data.start),
+                        end: data.end ? new Date(data.end) : new Date(new Date(data.start).getTime() + 3600000),
+                        category: data.category || 'work',
+                        location: data.location
+                    });
+                    sendAIMessage(`📅 Evento passado registrado: "${data.title}" em ${new Date(data.start).toLocaleString()}.`);
+                    setPendingAction(null);
+                    return;
+                } else if (isNo) {
+                    sendAIMessage("Entendido. Agendamento cancelado.");
+                    setPendingAction(null);
+                    return;
                 }
+                // Se não for nem Sim nem Não (ex: "Muda para as 18h"), deixa passar para a IA processar como novo comando
                 setPendingAction(null);
-                return; 
-            } 
-            if (['não', 'nao', 'no', 'cancelar'].some(word => lower.includes(word))) {
-                sendAIMessage("Entendido. Ação cancelada.");
-                setPendingAction(null);
-                return;
             }
-            sendAIMessage(`Por favor, responda apenas com "Sim" para confirmar ou "Não" para cancelar.`);
-            return;
+            else {
+                // General Logic for other actions
+                if (isYes) {
+                    if (pendingAction.action.action === 'NEGOTIATE_DEADLINE') {
+                        await appContext.addTask(pendingAction.action.payload.title, pendingAction.action.payload.dueDate);
+                        sendAIMessage(`Combinado! Agendei "${pendingAction.action.payload.title}" para amanhã.`);
+                    } else {
+                        await executeIAAction(pendingAction.action, appContext, (text) => sendAIMessage(text));
+                    }
+                    setPendingAction(null);
+                    return; 
+                } 
+                else if (isNo) {
+                    sendAIMessage("Entendido. Ação cancelada.");
+                    setPendingAction(null);
+                    return;
+                }
+                // Fall through for negotiation text
+                setPendingAction(null);
+            }
         }
 
         // 2. Image Editing
@@ -142,17 +181,30 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
                 sendAIMessage(`✅ Tarefa criada: "${args.title}"${dueDate ? ` para ${dueDate.toLocaleDateString()}` : ''}.`);
             } 
             else if (name === 'create_event') {
+                const start = new Date(args.start);
+                
+                // --- Business Rule: Check for Past Events ---
+                if (!canCreateEvent(start)) {
+                    setPendingAction({
+                        action: { action: 'ADD_EVENT', payload: args } as any,
+                        question: 'CONFIRM_PAST_EVENT',
+                        data: args
+                    });
+                    sendAIMessage(`⚠️ O horário solicitado (${start.toLocaleString()}) já passou. Deseja agendar mesmo assim?`);
+                    return;
+                }
+
                 await appContext.addEvent({
                     title: args.title,
-                    start: new Date(args.start),
-                    end: args.end ? new Date(args.end) : new Date(new Date(args.start).getTime() + 3600000),
+                    start: start,
+                    end: args.end ? new Date(args.end) : new Date(start.getTime() + 3600000),
                     category: args.category || 'work',
                     location: args.location
                 });
-                sendAIMessage(`📅 Evento agendado: "${args.title}" em ${new Date(args.start).toLocaleString()}.`);
+                sendAIMessage(`📅 Evento agendado: "${args.title}" em ${start.toLocaleString()}.`);
             }
             else if (name === 'create_routine') {
-                // Mock execution for routine (assuming routine is just a recurring task in this demo)
+                // Mock execution for routine
                 sendAIMessage(`🔄 Rotina "${args.title}" registrada para às ${args.time}.`);
             }
             else {
@@ -165,7 +217,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
 
     } catch (e) {
         console.error("Maya Error:", e);
-        sendAIMessage('Desculpe, tive um problema interno.');
+        sendAIMessage('Desculpe, tive um problema interno. Tente reformular.');
     } finally {
         setIaStatus('idle');
     }
