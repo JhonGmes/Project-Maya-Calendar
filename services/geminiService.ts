@@ -23,7 +23,7 @@ try {
 
 const getAI = () => {
   if (!process.env.API_KEY) {
-      console.error("CRITICAL: Gemini API Key is missing.");
+      console.error("CRITICAL: Gemini API Key is missing. Get one at https://aistudio.google.com/app/apikey");
   }
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 }
@@ -255,7 +255,7 @@ export const chatWithMaya = async (message: string, history: any[], mode: 'fast'
     
     // Validate API Key presence
     if (!process.env.API_KEY) {
-        throw new Error("API Key is missing. Check .env file.");
+        throw new Error("API_KEY_MISSING");
     }
 
     const validHistory = cleanHistory(history);
@@ -321,8 +321,8 @@ export const chatWithMaya = async (message: string, history: any[], mode: 'fast'
 
   } catch (error: any) {
     console.error("Chat Error Details:", error);
-    if (error.message.includes("API Key")) {
-        return { text: "Erro: Chave de API não configurada no ambiente." };
+    if (error.message.includes("API Key") || error.message === "API_KEY_MISSING") {
+        return { text: "Erro: Chave de API ausente. Gere uma em aistudio.google.com/app/apikey e adicione ao Vercel (Environment Variables > VITE_GEMINI_API_KEY)." };
     }
     return { text: "Desculpe, tive um problema de conexão. Tente novamente." };
   }
