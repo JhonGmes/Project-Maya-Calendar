@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video } from 'lucide-react';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video, Maximize2, Minimize2 } from 'lucide-react';
 import { generateImage, generateSpeech, chatWithMaya, editImage, analyzeVideo } from '../services/geminiService';
 import { parseIAResponse } from '../utils/iaActionEngine';
 import { adaptTone } from '../utils/personalityEngine';
@@ -17,12 +17,14 @@ interface MayaModalProps {
 
 export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   const appContext = useApp();
-  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality, agentSuggestion, setAgentSuggestion, executeIAAction, tasks, events, iaHistory, currentTeam, userRole } = appContext;
+  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality, agentSuggestion, setAgentSuggestion, executeIAAction, cancelIAAction, tasks, events, iaHistory, currentTeam, userRole } = appContext;
 
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<{data: string, mimeType: string} | null>(null);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false); // New Fullscreen State
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputVideoRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -30,7 +32,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, pendingAction]);
+  }, [messages, pendingAction, isMaximized]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -84,7 +86,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       setIaStatus('executing');
       try {
            // Executa a ação original armazenada no estado
-           await executeIAAction(pendingAction.originalAction);
+           await executeIAAction(pendingAction.originalAction, "ai");
            sendAIMessage("Feito!");
       } catch (e) {
           sendAIMessage("Ocorreu um erro ao executar a ação.");
@@ -93,9 +95,8 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       setIaStatus('idle');
   };
 
-  const cancelAction = () => {
-      setPendingAction(null);
-      sendAIMessage("Ação cancelada.");
+  const cancelAction = async () => {
+      await cancelIAAction();
   };
 
   // Phase 5: Handle Negotiation Choice
@@ -117,8 +118,8 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       
       // Agent Suggestions are basically pre-packaged IA Actions
       // If the suggestion type implies a confirmation, we trigger the confirmation flow
-      if (agentSuggestion.type === 'warning' || agentSuggestion.type === 'pattern') {
-          await executeIAAction(agentSuggestion.actionData);
+      if (agentSuggestion.type === 'warning' || agentSuggestion.type === 'pattern' || agentSuggestion.type === 'workflow_step') {
+          await executeIAAction(agentSuggestion.actionData, "ai");
           setAgentSuggestion(null);
       } 
   };
@@ -215,7 +216,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
 
         // 4.4 Execute actions
         for (const action of parsedResponse.actions) {
-            await executeIAAction(action);
+            await executeIAAction(action, "ai");
         }
 
     } catch (e) {
@@ -238,7 +239,10 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="w-full max-w-lg bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl flex flex-col overflow-hidden relative border border-white/20 h-[500px] max-h-[85vh] animate-fade-in">
+      <div className={`
+          bg-white dark:bg-zinc-900 shadow-2xl flex flex-col overflow-hidden relative border border-white/20 animate-fade-in transition-all duration-300
+          ${isMaximized ? 'fixed inset-0 w-full h-full rounded-none' : 'w-full max-w-lg h-[500px] max-h-[85vh] rounded-3xl'}
+      `}>
         
         {/* Header */}
         <div className="p-4 border-b border-gray-100 dark:border-white/5 flex justify-between items-center bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md">
@@ -254,7 +258,16 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                     </p>
                 </div>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={20} className="dark:text-white" /></button>
+            <div className="flex items-center gap-2">
+                <button 
+                    onClick={() => setIsMaximized(!isMaximized)} 
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full text-gray-500 dark:text-gray-300"
+                    title={isMaximized ? "Restaurar" : "Tela Cheia"}
+                >
+                    {isMaximized ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+                <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={20} className="dark:text-white" /></button>
+            </div>
         </div>
 
         {/* Chat Area */}
@@ -318,7 +331,14 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                         {msg.type === 'video' && msg.content && (
                             <div className="space-y-2">
                                 <p className="opacity-80 text-xs mb-1">{msg.text}</p>
-                                <video controls src={msg.content} className="rounded-lg w-full h-auto border border-white/10 max-h-60" />
+                                {/* Video Player with better styling for fullscreen handling */}
+                                <div className="rounded-lg overflow-hidden border border-white/10 bg-black">
+                                    <video 
+                                        controls 
+                                        src={msg.content} 
+                                        className="w-full h-auto max-h-[60vh] object-contain" 
+                                    />
+                                </div>
                                 {msg.sender === 'user' && selectedVideo?.data === msg.content.split(',')[1] && (
                                         <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Vídeo em análise</div>
                                 )}

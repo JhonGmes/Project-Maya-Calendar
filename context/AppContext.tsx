@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction, IAHistoryItem, FocusSession, UserRole, ScoreBreakdown, SystemDecision, ProductivityScore, WorkflowTemplate, Workflow, WorkflowLog } from "../types";
+import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction, IAHistoryItem, FocusSession, UserRole, ScoreBreakdown, SystemDecision, ProductivityScore, WorkflowTemplate, Workflow, WorkflowLog, IAActionHistory } from "../types";
 import { StorageService } from "../services/storage";
 import { supabase } from "../services/supabaseClient";
 import { calculatePriority, sortTasksByDeadline } from "../utils/taskUtils";
@@ -44,9 +44,9 @@ export interface AppContextData {
   addWorkflow: (title: string, steps: string[]) => Promise<void>; 
   saveWorkflowAsTemplate: (workflow: Workflow) => Promise<void>; 
   createWorkflowFromTemplate: (template: WorkflowTemplate) => Promise<void>; 
-  advanceWorkflow: (task: Task, stepId: string) => Promise<void>; // New: Logged Workflow Advance
+  advanceWorkflow: (task: Task, stepId: string) => Promise<void>; 
   templates: WorkflowTemplate[]; 
-  workflowLogs: WorkflowLog[]; // New: Exposed for analytics
+  workflowLogs: WorkflowLog[]; 
   updateTask: (task: Task) => Promise<void>;
   events: CalendarEvent[];
   addEvent: (event: Partial<CalendarEvent>) => Promise<void>;
@@ -68,7 +68,8 @@ export interface AppContextData {
   addMessage: (message: IAMessage) => void;
   pendingAction: PendingActionState | null;
   setPendingAction: (action: PendingActionState | null) => void;
-  executeIAAction: (action: IAAction, source?: "user" | "ai") => Promise<void>; 
+  executeIAAction: (action: IAAction, source?: "user" | "ai") => Promise<void>;
+  cancelIAAction: () => Promise<void>; // New: Explicit Cancel
   iaHistory: IAHistoryItem[];
   agentSuggestion: AgentSuggestion | null;
   setAgentSuggestion: (suggestion: AgentSuggestion | null) => void;
@@ -473,6 +474,40 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setFocusSession({ isActive: false, taskId: null, startTime: null, plannedDuration: 25 });
   };
 
+  // Explicit Cancel Function for IA Confirmation
+  const cancelIAAction = async () => {
+      if (!pendingAction) return;
+      
+      const { originalAction } = pendingAction;
+      
+      // If it's a workflow step, log the cancellation
+      if (originalAction.type === 'COMPLETE_STEP') {
+          const { taskId, stepId } = originalAction.payload;
+          const task = tasks.find(t => t.id === taskId);
+          
+          if (task && task.workflow) {
+              const newHistoryItem: IAActionHistory = {
+                  id: StorageService.generateId(),
+                  actionType: 'COMPLETE_STEP',
+                  confirmed: false,
+                  timestamp: new Date().toISOString(),
+                  details: `Step ${stepId} cancelled by user`
+              };
+              
+              const updatedWf = {
+                  ...task.workflow,
+                  iaHistory: [...(task.workflow.iaHistory || []), newHistoryItem]
+              };
+              
+              const updatedTask = { ...task, workflow: updatedWf };
+              await updateTask(updatedTask);
+          }
+      }
+      
+      setPendingAction(null);
+      addMessage({ id: Date.now().toString(), sender: 'maya', text: "Ação cancelada." });
+  };
+
   const executeIAAction = async (action: IAAction, source: "user" | "ai" = "ai") => {
     if (action.type !== 'NEGOTIATE_DEADLINE' && action.type !== 'ASK_CONFIRMATION' && action.type !== 'SHOW_SUMMARY') {
         setIaHistory(prev => [
@@ -515,8 +550,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         case "COMPLETE_STEP": // AI Automation
              const { taskId: tId, stepId } = action.payload;
              const targetTask = tasks.find(t => t.id === tId);
-             if (targetTask) {
+             
+             if (targetTask && targetTask.workflow) {
                  await advanceWorkflow(targetTask, stepId);
+                 
+                 // Log AI confirmation history in the Workflow object itself (Confirmed = true)
+                 if (source === 'ai') {
+                     const newHistoryItem: IAActionHistory = {
+                         id: StorageService.generateId(),
+                         actionType: 'COMPLETE_STEP',
+                         confirmed: true,
+                         timestamp: new Date().toISOString(),
+                         details: `Step ${stepId} completed via AI`
+                     };
+                     
+                     const updatedWf = {
+                         ...targetTask.workflow,
+                         iaHistory: [...(targetTask.workflow.iaHistory || []), newHistoryItem]
+                     };
+                     
+                     const taskWithHistory = {
+                         ...targetTask, 
+                         workflow: {
+                             ...updatedWf,
+                             // Re-calculate completion based on steps if needed, 
+                             // but 'advanceWorkflow' already handles status transition.
+                             // We just need to persist the history.
+                         }
+                     };
+                     await updateTask(taskWithHistory);
+                 }
+
                  addToast({ id: Date.now().toString(), title: "Etapa Concluída", message: "Avanço registrado via IA.", type: "success" });
              }
              break;
@@ -571,6 +635,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         messages, addMessage,
         pendingAction, setPendingAction,
         executeIAAction,
+        cancelIAAction,
         iaHistory,
         agentSuggestion, setAgentSuggestion,
         productivityScore, scoreBreakdown, scoreHistory, dailyFocus,

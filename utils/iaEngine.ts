@@ -1,5 +1,4 @@
 
-
 import { Task, CalendarEvent, IAHistoryItem } from '../types';
 import { analyzePatterns } from './userPatterns';
 import { generateWeeklyPlan, formatWeeklyPlan } from './weeklyPlanner';
@@ -17,10 +16,11 @@ export type IAIntent =
   | "reorganizar_semana"
   | "definir_metas"
   | "iniciar_foco"
-  | "parar_foco";
+  | "parar_foco"
+  | "completar_etapa"; // Added for Workflow
 
 export interface IAAction {
-  action: "ADD_TASK" | "ADD_EVENT" | "CHANGE_SCREEN" | "REPLY" | "REORGANIZE_WEEK" | "NEGOTIATE_DEADLINE" | "SAVE_GOALS" | "RESCHEDULE_TASK" | "START_FOCUS" | "END_FOCUS" | "UNKNOWN";
+  action: "ADD_TASK" | "ADD_EVENT" | "CHANGE_SCREEN" | "REPLY" | "REORGANIZE_WEEK" | "NEGOTIATE_DEADLINE" | "SAVE_GOALS" | "RESCHEDULE_TASK" | "START_FOCUS" | "END_FOCUS" | "COMPLETE_STEP" | "UNKNOWN";
   payload: any;
   needsConfirmation?: boolean; 
   question?: string;           
@@ -38,6 +38,7 @@ export function detectIntent(text: string): IAIntent {
   if (lower.includes("planejar semana") || lower.includes("plano semanal")) return "planejar_semana";
   if (lower.includes("reorganizar") || (lower.includes("atraso") && lower.includes("ajudar"))) return "reorganizar_semana";
   if (lower.includes("meta") || lower.includes("trimestre") || lower.includes("objetivos")) return "definir_metas";
+  if ((lower.includes("marcar") || lower.includes("concluir") || lower.includes("já fiz")) && (lower.includes("etapa") || lower.includes("passo"))) return "completar_etapa";
   return "conversar";
 }
 
@@ -74,6 +75,29 @@ export function processIAInput(text: string, context: { tasks: Task[], events: C
         return {
             action: "END_FOCUS",
             payload: { completed: false }
+        };
+
+    case "completar_etapa":
+        // Heuristic: Find active workflow task
+        const workflowTask = context.tasks.find(t => t.workflow && t.workflow.status === 'in_progress');
+        if (workflowTask && workflowTask.workflow) {
+            const nextStep = workflowTask.workflow.steps.find(s => s.status === 'available');
+            if (nextStep) {
+                return {
+                    action: "COMPLETE_STEP",
+                    needsConfirmation: true, // STRICTLY ENFORCE CONFIRMATION
+                    question: `Confirma a conclusão da etapa "${nextStep.title}" no fluxo "${workflowTask.title}"?`,
+                    payload: {
+                        taskId: workflowTask.id,
+                        stepId: nextStep.id,
+                        workflowId: workflowTask.workflow.id
+                    }
+                };
+            }
+        }
+        return {
+            action: "REPLY",
+            payload: "Não encontrei um fluxo ativo com etapas pendentes para concluir."
         };
 
     case "criar_tarefa":

@@ -80,6 +80,8 @@ export const chatWithMaya = async (
         ? buildIAContext(appContext.tasks, appContext.events, appContext.history, appContext.currentTeam, appContext.userRole)
         : "No context provided.";
 
+    // Select Model based on mode
+    // Thinking Mode uses gemini-3-pro-preview
     const modelName = mode === 'thinking' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
 
     // O Prompt do Sistema agora define o protocolo de comunicação E PERSONA DE GESTÃO
@@ -92,12 +94,12 @@ export const chatWithMaya = async (
     
     PROTOCOL:
     1. You act as an intermediary between the user and the app state.
-    2. You DO NOT execute actions yourself. You return JSON instructions.
+    2. You DO NOT execute actions yourself. You return JSON instructions (Action Proposals).
     3. You MUST ALWAYS return a valid JSON object matching the Output Schema below.
     
     OUTPUT SCHEMA:
     {
-      "message": "Your conversational response to the user (e.g. 'Entendido, agendei para você.')",
+      "message": "Your conversational response to the user (e.g. 'Entendido, sugiro agendar isso.')",
       "actions": [ ... list of action objects ... ]
     }
 
@@ -114,21 +116,28 @@ export const chatWithMaya = async (
     - CHANGE_SCREEN: { payload: 'day'|'week'|'month'|'tasks'|'analytics' }
     - ASK_CONFIRMATION: { message: string, action: ActionObject } 
     - NEGOTIATE_DEADLINE: { taskTitle: string, reason: string, options: [{ label: string, action: ActionObject }] }
+    - COMPLETE_STEP: { taskId: string, stepId: string, workflowId: string }
     - NO_ACTION: {} 
 
     RULES:
     - If user says "My week is messy" or overload is detected, propose REORGANIZE_WEEK.
     - If user asks about performance, use CHANGE_SCREEN to 'analytics'.
+    - If user asks to complete a workflow step, you MUST use ASK_CONFIRMATION wrapping COMPLETE_STEP.
     - Response MUST be ONLY the JSON object. Do not add markdown blocks like \`\`\`json.
     `;
 
     const config: any = {
          systemInstruction: systemPrompt,
-         responseMimeType: "application/json" // Força output JSON
+         responseMimeType: "application/json"
     };
 
+    // Configure Thinking Mode
     if (mode === 'thinking') {
         config.thinkingConfig = { thinkingBudget: 32768 };
+        // IMPORTANT: maxOutputTokens must NOT be set when using thinkingConfig with this budget.
+    } else {
+        // Only set maxOutputTokens for non-thinking models
+        config.maxOutputTokens = 8192;
     }
 
     const chat = ai.chats.create({

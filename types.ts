@@ -40,6 +40,14 @@ export interface WorkflowStep {
   };
 }
 
+export interface IAActionHistory {
+  id: string;
+  actionType: string;
+  confirmed: boolean;
+  timestamp: string;
+  details?: string;
+}
+
 export interface Workflow {
   id: string;
   title: string;
@@ -49,7 +57,8 @@ export interface Workflow {
   createdAt: string;
   totalSteps: number;
   completedSteps: number;
-  ownerId?: string; // New: Owner identification
+  ownerId?: string; 
+  iaHistory?: IAActionHistory[]; // New: Track AI suggestions/confirmations
 }
 
 export interface WorkflowTemplate {

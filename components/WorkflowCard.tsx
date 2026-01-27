@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Task, Workflow } from '../types';
-import { CheckCircle2, Lock, Circle, ChevronDown, ChevronUp, Play, Briefcase, Save, User } from 'lucide-react';
+import { CheckCircle2, Lock, Circle, ChevronDown, ChevronUp, Play, Briefcase, Save, User, Bot, Check, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 interface WorkflowCardProps {
@@ -21,6 +21,9 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({ task, onUpdate, onTo
   };
 
   const progress = (workflow.completedSteps / workflow.totalSteps) * 100;
+
+  // Get last AI interaction
+  const lastHistory = workflow.iaHistory && workflow.iaHistory.length > 0 ? workflow.iaHistory[workflow.iaHistory.length - 1] : null;
 
   return (
     <div className={`
@@ -139,6 +142,19 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({ task, onUpdate, onTo
               </div>
             );
           })}
+
+          {/* AI History Footer */}
+          {lastHistory && (
+              <div className="mt-4 pt-3 border-t border-gray-200 dark:border-white/10 flex items-center gap-2 text-[10px] text-gray-400">
+                  <Bot size={12} className={lastHistory.confirmed ? "text-green-500" : "text-red-500"} />
+                  <span>
+                      Última ação da IA: <span className={lastHistory.confirmed ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
+                          {lastHistory.confirmed ? 'Confirmada' : 'Rejeitada'}
+                      </span>
+                  </span>
+                  {lastHistory.confirmed ? <Check size={10} /> : <X size={10} />}
+              </div>
+          )}
         </div>
       )}
     </div>
