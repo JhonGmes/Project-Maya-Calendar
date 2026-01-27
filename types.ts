@@ -80,8 +80,24 @@ export interface IAMessage {
   content?: string;
 }
 
+// Phase 2 - Agent Types
+export interface AgentSuggestion {
+    id: string;
+    type: 'optimization' | 'warning' | 'pattern';
+    message: string;
+    actionLabel: string;
+    actionData: IAAction; // Link directly to Action Engine
+}
+
+export interface IAAction {
+  action: "ADD_TASK" | "ADD_EVENT" | "CHANGE_SCREEN" | "REPLY" | "REORGANIZE_WEEK" | "NEGOTIATE_DEADLINE" | "SAVE_GOALS" | "RESCHEDULE_TASK" | "UNKNOWN";
+  payload: any;
+  needsConfirmation?: boolean; 
+  question?: string;           
+}
+
 export interface PendingAction {
-  action: any; // IAAction
+  action: IAAction;
   question: string;
   data?: any;
 }

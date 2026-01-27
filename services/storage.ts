@@ -286,6 +286,41 @@ export const StorageService = {
      localStorage.setItem(LOCAL_STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
   },
 
+  markNotificationAsRead: async (id: string): Promise<void> => {
+      // Supabase
+      if (!isLocalMode && supabase) {
+          try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) {
+                  await supabase.from('notifications').update({ read: true }).eq('id', id).eq('user_id', user.id);
+              }
+          } catch (e) { console.error("Error marking read", e); }
+      }
+
+      // Local
+      const data = localStorage.getItem(LOCAL_STORAGE_KEYS.NOTIFICATIONS);
+      if (data) {
+          const notifications = JSON.parse(data);
+          const updated = notifications.map((n: any) => n.id === id ? { ...n, read: true } : n);
+          localStorage.setItem(LOCAL_STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
+      }
+  },
+
+  clearNotifications: async (): Promise<void> => {
+      // Supabase
+      if (!isLocalMode && supabase) {
+          try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) {
+                  await supabase.from('notifications').delete().eq('user_id', user.id);
+              }
+          } catch (e) { console.error("Error clearing notifications", e); }
+      }
+
+      // Local
+      localStorage.removeItem(LOCAL_STORAGE_KEYS.NOTIFICATIONS);
+  },
+
   getHistory: async (): Promise<ScoreHistory[]> => {
     if (!isLocalMode && supabase) {
         try {

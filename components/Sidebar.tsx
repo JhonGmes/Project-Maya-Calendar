@@ -14,7 +14,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onLogout, onOpenSettings, isOpenMobile, setIsOpenMobile }) => {
-  const { unreadNotifications, isSupabaseConnected } = useApp();
+  const { unreadNotifications, isSupabaseConnected, setNotificationsOpen } = useApp();
   
   const menuItems = [
     { id: 'day', label: 'Hoje', icon: LayoutDashboard },
@@ -63,6 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onL
           <div className="pt-6 border-t border-gray-200 dark:border-white/10 space-y-2">
              {/* Notifications Trigger (Phase 18) */}
              <button 
+              onClick={() => { setNotificationsOpen(true); setIsOpenMobile(false); }}
               className="w-full flex items-center gap-3 px-4 py-3 text-gray-600 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-white/5 rounded-xl transition-colors relative"
             >
               <Bell size={20} />

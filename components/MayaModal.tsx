@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain } from 'lucide-react';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight } from 'lucide-react';
 import { generateImage, generateSpeech, chatWithMaya, editImage } from '../services/geminiService';
 import { processIAInput } from '../utils/iaEngine';
 import { executeIAAction } from '../utils/iaActions';
@@ -18,17 +18,26 @@ interface MayaModalProps {
 
 export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks, allEvents }) => {
   const appContext = useApp();
-  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality } = appContext;
+  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality, agentSuggestion, setAgentSuggestion } = appContext;
 
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages]);
+  }, [messages, pendingAction]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+    }
+  }, [input]);
 
   const sendAIMessage = (text: string, type: 'text' | 'image' | 'audio' = 'text', content?: string) => {
       const adaptedText = type === 'text' ? adaptTone(text, personality) : text;
@@ -56,11 +65,67 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
       return start.getTime() >= (now.getTime() - 5 * 60000);
   };
 
+  // Phase 2: Handle Explicit Confirmation Buttons
+  const confirmAction = async () => {
+      if (!pendingAction) return;
+      
+      setIaStatus('executing');
+      try {
+          if (pendingAction.question === 'CONFIRM_PAST_EVENT') {
+               const data = pendingAction.data;
+               await appContext.addEvent({
+                    title: data.title,
+                    start: new Date(data.start),
+                    end: data.end ? new Date(data.end) : new Date(new Date(data.start).getTime() + 3600000),
+                    category: data.category || 'work',
+                    location: data.location
+               });
+               sendAIMessage(`📅 Evento passado registrado: "${data.title}" em ${new Date(data.start).toLocaleString()}.`);
+          } else {
+               await executeIAAction(pendingAction.action, appContext, (text) => sendAIMessage(text));
+          }
+      } catch (e) {
+          sendAIMessage("Ocorreu um erro ao executar a ação.");
+      }
+      setPendingAction(null);
+      setIaStatus('idle');
+  };
+
+  const cancelAction = () => {
+      setPendingAction(null);
+      sendAIMessage("Ação cancelada.");
+  };
+
+  const acceptSuggestion = async () => {
+      if (!agentSuggestion) return;
+      
+      // If it needs confirmation, set it as pending
+      if (agentSuggestion.actionData.needsConfirmation) {
+          setPendingAction({
+              action: agentSuggestion.actionData,
+              question: agentSuggestion.actionData.question || "Confirma esta ação?"
+          });
+          setAgentSuggestion(null); // Clear suggestion as it is now pending
+          // Trigger a message to context
+          addMessage({ id: Date.now().toString(), sender: 'maya', text: agentSuggestion.message });
+      } else {
+          // Execute immediately
+          setIaStatus('executing');
+          await executeIAAction(agentSuggestion.actionData, appContext, (text) => sendAIMessage(text));
+          setAgentSuggestion(null);
+          setIaStatus('idle');
+      }
+  };
+
   const handleSend = async () => {
     if (!input.trim() && !selectedImage) return;
     const userMsg = input;
     
     setInput('');
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'; // Reset height immediately
+    }
+
     if (userMsg.trim()) {
         addMessage({ id: Date.now().toString(), sender: 'user', text: userMsg, type: 'text' });
     }
@@ -70,57 +135,20 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
     try {
         const lower = userMsg.toLowerCase().trim();
 
-        // 1. Pending Confirmation Actions (Negociação)
+        // 1. Pending Action Text Reply (Fallback if user types instead of clicking)
         if (pendingAction) {
-            
-            // Check for strict "Yes" - e.g. "Sim", "Confirmar"
             const isYes = ['sim', 'yes', 'confirmar', 'claro'].some(w => lower === w || lower.startsWith(w + ' ') || lower.endsWith(' ' + w));
-            
-            // Check for strict "No" - e.g. "Não", "Cancelar"
             const isNo = ['não', 'nao', 'no', 'cancelar'].some(w => lower === w || lower.startsWith(w + ' '));
 
-            // Logica para confirmar evento passado
-            if (pendingAction.question === 'CONFIRM_PAST_EVENT') {
-                if (isYes) {
-                    const data = pendingAction.data;
-                    await appContext.addEvent({
-                        title: data.title,
-                        start: new Date(data.start),
-                        end: data.end ? new Date(data.end) : new Date(new Date(data.start).getTime() + 3600000),
-                        category: data.category || 'work',
-                        location: data.location
-                    });
-                    sendAIMessage(`📅 Evento passado registrado: "${data.title}" em ${new Date(data.start).toLocaleString()}.`);
-                    setPendingAction(null);
-                    return;
-                } else if (isNo) {
-                    sendAIMessage("Entendido. Agendamento cancelado.");
-                    setPendingAction(null);
-                    return;
-                }
-                // Se não for nem Sim nem Não, deixa passar para a IA processar como novo comando
-                setPendingAction(null);
+            if (isYes) {
+                await confirmAction();
+                return;
+            } else if (isNo) {
+                cancelAction();
+                return;
             }
-            else {
-                // General Logic for other actions
-                if (isYes) {
-                    if (pendingAction.action.action === 'NEGOTIATE_DEADLINE') {
-                        await appContext.addTask(pendingAction.action.payload.title, pendingAction.action.payload.dueDate);
-                        sendAIMessage(`Combinado! Agendei "${pendingAction.action.payload.title}" para amanhã.`);
-                    } else {
-                        await executeIAAction(pendingAction.action, appContext, (text) => sendAIMessage(text));
-                    }
-                    setPendingAction(null);
-                    return; 
-                } 
-                else if (isNo) {
-                    sendAIMessage("Entendido. Ação cancelada.");
-                    setPendingAction(null);
-                    return;
-                }
-                // Fall through for negotiation text
-                setPendingAction(null);
-            }
+            // If text is not yes/no, continue to normal processing (user ignored question)
+            setPendingAction(null); 
         }
 
         // 2. Image Editing
@@ -258,6 +286,13 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -281,6 +316,28 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
 
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50 dark:bg-black/20" ref={scrollRef}>
+            
+            {/* Agent Proactive Suggestion Banner */}
+            {agentSuggestion && (
+                <div className="bg-gradient-to-r from-purple-100 to-blue-50 dark:from-purple-900/40 dark:to-blue-900/20 p-4 rounded-2xl border border-purple-200 dark:border-white/10 mb-4 animate-slide-up">
+                    <div className="flex items-start gap-3">
+                        <div className="p-2 bg-white dark:bg-white/10 rounded-full text-purple-600 dark:text-purple-300">
+                             {agentSuggestion.type === 'warning' ? <AlertTriangle size={18} /> : <Brain size={18} />}
+                        </div>
+                        <div className="flex-1">
+                            <p className="text-sm font-medium text-purple-900 dark:text-purple-100 mb-2">{agentSuggestion.message}</p>
+                            <button 
+                                onClick={acceptSuggestion}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded-lg font-bold transition-colors shadow-sm"
+                            >
+                                {agentSuggestion.actionLabel} <ArrowRight size={12} />
+                            </button>
+                        </div>
+                        <button onClick={() => setAgentSuggestion(null)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                    </div>
+                </div>
+            )}
+
             {messages.map((msg) => (
                 <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div className={`
@@ -318,6 +375,30 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
                     </div>
                 </div>
             ))}
+
+            {/* Pending Action Confirmation UI */}
+            {pendingAction && (
+                <div className="flex justify-start animate-slide-up">
+                    <div className="bg-white dark:bg-zinc-800 p-4 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-custom-caramel">
+                        <p className="font-bold text-gray-800 dark:text-white mb-3 text-sm">{pendingAction.question}</p>
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={confirmAction}
+                                className="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                            >
+                                <Check size={14} /> Confirmar
+                            </button>
+                            <button 
+                                onClick={cancelAction}
+                                className="flex-1 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 text-gray-600 dark:text-gray-300 px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                            >
+                                <X size={14} /> Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {iaStatus === 'thinking' && (
                 <div className="flex justify-start">
                     <div className="bg-white dark:bg-zinc-800 p-3 rounded-2xl rounded-bl-none shadow-sm border border-gray-100 dark:border-white/5">
@@ -362,13 +443,14 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
                  </button>
                  
                  <div className="relative flex-1">
-                    <input 
-                        type="text" 
+                    <textarea 
+                        ref={textareaRef}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                        onKeyDown={handleKeyDown}
                         placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "Digite como editar..." : "Mensagem ou comando...")}
-                        className={`w-full bg-gray-100 dark:bg-black/50 border-none rounded-full py-3 pl-4 pr-12 focus:ring-2 dark:text-white transition-all ${isThinkingMode ? 'focus:ring-purple-500/50 bg-purple-50/10' : 'focus:ring-custom-caramel/50'}`}
+                        rows={1}
+                        className={`w-full bg-gray-100 dark:bg-black/50 border-none rounded-2xl py-3 pl-4 pr-12 focus:ring-2 dark:text-white transition-all resize-none overflow-hidden min-h-[48px] ${isThinkingMode ? 'focus:ring-purple-500/50 bg-purple-50/10' : 'focus:ring-custom-caramel/50'}`}
                     />
                     <button 
                         onClick={handleSend}
@@ -385,6 +467,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
                  <div className="flex gap-4 text-[10px] text-gray-400">
                     <span className="flex items-center gap-1"><Upload size={10} /> Editar</span>
                     <span className="flex items-center gap-1"><ImageIcon size={10} /> Gerar</span>
+                    <span className="flex items-center gap-1">Shift+Enter para pular linha</span>
                  </div>
                  
                  {/* Thinking Mode Toggle */}

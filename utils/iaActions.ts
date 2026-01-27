@@ -1,5 +1,5 @@
 
-import { IAAction } from './iaEngine';
+import { IAAction } from '../types';
 import { AppContextData } from '../context/AppContext';
 import { ViewMode } from '../types';
 import { applyReorganization } from './weekReorganizer';
@@ -60,6 +60,22 @@ export const executeIAAction = async (
             onReply("Semana reorganizada com sucesso! Verifique a tela de Tarefas.");
           }
           break;
+
+        case "RESCHEDULE_TASK":
+            // Suporta um array de IDs ou um único ID
+            const taskIds = Array.isArray(result.payload.taskIds) ? result.payload.taskIds : [result.payload.taskId];
+            const newDate = new Date(result.payload.newDate);
+            
+            let count = 0;
+            for (const id of taskIds) {
+                const task = context.tasks.find(t => t.id === id);
+                if (task) {
+                    await context.updateTask({ ...task, dueDate: newDate });
+                    count++;
+                }
+            }
+            onReply(`Pronto! ${count} tarefa(s) reagendada(s) para ${newDate.toLocaleString()}.`);
+            break;
 
         case "SAVE_GOALS":
            if (result.payload && Array.isArray(result.payload)) {

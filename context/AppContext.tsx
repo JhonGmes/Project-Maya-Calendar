@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { Task, CalendarEvent, UserProfile, ViewMode, PendingAction, IAMessage, Notification, ScoreHistory, Team, PersonalityType } from "../types";
+import { Task, CalendarEvent, UserProfile, ViewMode, PendingAction, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion } from "../types";
 import { StorageService } from "../services/storage";
 import { supabase } from "../services/supabaseClient";
 import { calculatePriority, sortTasksByDeadline } from "../utils/taskUtils";
@@ -13,6 +13,7 @@ import { detectPersonality } from "../utils/personalityEngine";
 import { generateWeeklyReport } from "../utils/weeklyReport"; 
 import { detectBurnout } from "../utils/burnoutDetector";
 import { useAuth } from "./AuthContext";
+import { observeState } from "../utils/agentObserver";
 
 type Screen = ViewMode | "login" | "settings";
 
@@ -30,6 +31,8 @@ export interface AppContextData {
   setMayaOpen: (open: boolean) => void;
   isMobileMenuOpen: boolean;
   setMobileMenuOpen: (open: boolean) => void;
+  isNotificationsOpen: boolean;
+  setNotificationsOpen: (open: boolean) => void;
   toasts: ToastMessage[];
   addToast: (toast: ToastMessage) => void;
 
@@ -56,6 +59,8 @@ export interface AppContextData {
   addMessage: (message: IAMessage) => void;
   pendingAction: PendingAction | null;
   setPendingAction: (action: PendingAction | null) => void;
+  agentSuggestion: AgentSuggestion | null; // Phase 2: Agent suggestion
+  setAgentSuggestion: (suggestion: AgentSuggestion | null) => void;
   personality: PersonalityType;
   
   // Productivity
@@ -66,6 +71,8 @@ export interface AppContextData {
   // Notifications
   notifications: Notification[];
   unreadNotifications: number;
+  markNotificationAsRead: (id: string) => Promise<void>;
+  clearAllNotifications: () => Promise<void>;
   generateReport: () => void;
   
   // Diagnostics
@@ -81,6 +88,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [screen, setScreen] = useState<Screen>("day"); // Default to day, Auth wrapper handles Login screen
   const [isMayaOpen, setMayaOpen] = useState(false);
   const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // Data State
@@ -102,6 +110,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [iaStatus, setIaStatus] = useState<IAStatus>("idle");
   const [messages, setMessages] = useState<IAMessage[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null); 
+  const [agentSuggestion, setAgentSuggestion] = useState<AgentSuggestion | null>(null);
   const [hasCheckedReorg, setHasCheckedReorg] = useState(false);
   const [personality, setPersonality] = useState<PersonalityType>("neutro");
   const [hasCheckedBurnout, setHasCheckedBurnout] = useState(false);
@@ -203,6 +212,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       // 3. Detect Personality
       setPersonality(detectPersonality(tasks));
 
+      // Phase 2: Agent Observation (Substitui checks manuais antigos por um observador centralizado)
+      const suggestion = observeState(tasks);
+      if (suggestion) {
+          // Avoid spamming the same suggestion
+          setAgentSuggestion(prev => (prev?.id === suggestion.id ? prev : suggestion));
+      } else {
+          setAgentSuggestion(null);
+      }
+
       // 4. Check Deadlines & Notify
       const urgent = getUrgentTasks(tasks);
       if (urgent.length > 0) {
@@ -214,34 +232,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              });
              addToast({ id: 'urgent-tasks', title: 'Prazo', message: msg, type: 'info' });
           }
-      }
-
-      // 5. Auto-Reorganization Check
-      if (!hasCheckedReorg && urgent.length > 2) {
-          setHasCheckedReorg(true);
-          setMayaOpen(true);
-          const newPlan = reorganizeWeek(tasks);
-          addMessage({ 
-              id: Date.now().toString(), 
-              sender: 'maya', 
-              text: "Notei que você tem várias tarefas acumuladas. Posso reorganizar sua semana para equilibrar a carga?" 
-          });
-          setPendingAction({
-             action: { action: "REORGANIZE_WEEK", payload: newPlan },
-             question: "Confirmar reorganização automática da semana?"
-          });
-      }
-
-      // 6. Burnout Detection (Phase 25)
-      if (!hasCheckedBurnout && detectBurnout(tasks, scoreHistory)) {
-          setHasCheckedBurnout(true);
-          setMayaOpen(true);
-          addMessage({
-              id: Date.now().toString(),
-              sender: 'maya',
-              text: "⚠️ Percebi sinais de sobrecarga (muitas pendências e queda no desempenho). Podemos reduzir o ritmo, adiar tarefas ou focar só no essencial hoje. O que prefere?"
-          });
-          // No automatic action, just a prompt for conversation
       }
 
   }, [tasks]);
@@ -320,6 +310,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       addMessage({ id: Date.now().toString(), sender: 'maya', text: report });
       setMayaOpen(true);
   };
+  
+  const markNotificationAsRead = async (id: string) => {
+      await StorageService.markNotificationAsRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  };
+
+  const clearAllNotifications = async () => {
+      await StorageService.clearNotifications();
+      setNotifications([]);
+  };
 
   return (
     <AppContext.Provider
@@ -327,6 +327,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         screen, setScreen,
         isMayaOpen, setMayaOpen,
         isMobileMenuOpen, setMobileMenuOpen,
+        isNotificationsOpen, setNotificationsOpen,
         toasts, addToast,
         profile, updateProfile,
         tasks, addTask, updateTask,
@@ -334,8 +335,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         iaStatus, setIaStatus,
         messages, addMessage,
         pendingAction, setPendingAction,
+        agentSuggestion, setAgentSuggestion,
         productivityScore, scoreHistory, dailyFocus,
         notifications, unreadNotifications: notifications.filter(n => !n.read).length,
+        markNotificationAsRead,
+        clearAllNotifications,
         teams, currentTeam, switchTeam, 
         personality,
         generateReport,

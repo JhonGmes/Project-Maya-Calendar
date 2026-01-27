@@ -12,6 +12,7 @@ import { Login } from './components/Login';
 import { MayaModal } from './components/MayaModal';
 import { EventModal } from './components/EventModal';
 import { SettingsModal } from './components/SettingsModal';
+import { NotificationsModal } from './components/NotificationsModal';
 import { ToastContainer } from './components/Toast';
 import { ViewMode, CalendarEvent } from './types';
 import { Menu, Plus, Sparkles, Loader2 } from 'lucide-react';
@@ -23,6 +24,7 @@ const AppContent = () => {
     screen, setScreen, 
     isMayaOpen, setMayaOpen,
     isMobileMenuOpen, setMobileMenuOpen,
+    isNotificationsOpen, setNotificationsOpen,
     tasks, events, profile,
     addTask, updateTask, addEvent, updateProfile,
     toasts, addToast
@@ -159,6 +161,8 @@ const AppContent = () => {
       />
       
       {profile && <SettingsModal isOpen={isSettingsOpen} onClose={() => setSettingsOpen(false)} profile={profile} onSaveProfile={updateProfile} />}
+      
+      <NotificationsModal isOpen={isNotificationsOpen} onClose={() => setNotificationsOpen(false)} />
     </div>
   );
 };
