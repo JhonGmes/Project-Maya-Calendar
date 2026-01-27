@@ -7,7 +7,7 @@ import { ToastMessage } from "../components/Toast";
 import { calculateProductivityScore } from "../utils/productivityScore";
 import { getDailyFocus } from "../utils/dailyFocus";
 import { detectPersonality } from "../utils/personalityEngine"; 
-import { generateWeeklyReport } from "../utils/weeklyReport"; 
+import { generateWeeklyReport as generateStaticReport } from "../utils/weeklyReport"; 
 import { useAuth } from "./AuthContext";
 import { IAActionEngine as DecisionEngine } from "../utils/decisionEngine"; // Renamed to avoid conflict
 import { generateDailySummary } from "../utils/dailySummary";
@@ -16,6 +16,8 @@ import { WorkflowEngine } from "../utils/workflowEngine";
 import { detectBurnout } from "../utils/burnoutDetector";
 import { Permissions } from "../utils/permissions";
 import { checkAILimit, checkWorkflowLimit } from "../utils/plans";
+import { parseIAResponse } from "../utils/iaActionEngine";
+import { chatWithMaya } from "../services/geminiService";
 
 // --- NEW ARCHITECTURE IMPORTS ---
 import { IAActionEngine } from "../engine/IAActionEngine";
@@ -103,7 +105,7 @@ export interface AppContextData {
   unreadNotifications: number;
   markNotificationAsRead: (id: string) => Promise<void>;
   clearAllNotifications: () => Promise<void>;
-  generateReport: () => void;
+  generateReport: () => Promise<void>;
   isAuthenticated: boolean;
   isSupabaseConnected: boolean;
 }
@@ -500,11 +502,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setMessages(prev => [...prev, message]);
   };
 
-  const generateReport = () => {
-      const reportText = generateWeeklyReport(tasks, scoreHistory, iaHistory);
-      StorageService.saveNotification("Relatório Semanal Disponível");
-      addMessage({ id: Date.now().toString(), sender: 'maya', text: reportText });
+  const generateReport = async () => {
       setMayaOpen(true);
+      // User trigger message for context
+      addMessage({ id: Date.now().toString(), sender: 'user', text: "📊 Gerar Relatório Semanal de Produtividade" });
+      
+      setIaStatus('thinking');
+
+      try {
+          const prompt = `
+          Atue como Maya, uma coach de produtividade sênior.
+          Gere um Relatório Semanal detalhado e inteligente para o usuário.
+          
+          DADOS PARA ANÁLISE:
+          - Score Atual: ${productivityScore}
+          - Tarefas Pendentes: ${tasks.filter(t => !t.completed).length}
+          - Histórico de Ações (IA): ${iaHistory.length} registros
+          
+          ESTRUTURA DO RELATÓRIO (Markdown):
+          1. 🏆 **Veredito da Semana**: Uma frase de impacto sobre o desempenho.
+          2. 📈 **Análise de Dados**: Interprete o score e a consistência.
+          3. ⚠️ **Pontos de Atenção**: Identifique gargalos ou riscos de burnout.
+          4. 🚀 **Plano para Próxima Semana**: 3 ações práticas.
+
+          Use um tom profissional, analítico, mas encorajador.
+          Retorne no formato JSON padrão: { "message": "SEU_RELATORIO_MARKDOWN", "actions": [] }
+          `;
+
+          const rawResponse = await chatWithMaya(
+              prompt, 
+              [], 
+              'thinking', 
+              { tasks, events: state.events, history: iaHistory, currentTeam, userRole }
+          );
+
+          const parsed = parseIAResponse(rawResponse);
+          
+          addMessage({ id: Date.now().toString(), sender: 'maya', text: parsed.message });
+          StorageService.saveNotification("Relatório Semanal Inteligente disponível.");
+
+      } catch (err) {
+          console.error("Erro ao gerar relatório:", err);
+          addMessage({ id: Date.now().toString(), sender: 'maya', text: "Desculpe, não consegui processar seu relatório agora. Tente novamente em instantes." });
+      } finally {
+          setIaStatus('idle');
+      }
   };
   
   const markNotificationAsRead = async (id: string) => {
