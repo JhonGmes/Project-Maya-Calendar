@@ -1,24 +1,27 @@
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction, IAHistoryItem, FocusSession, UserRole, ScoreBreakdown, SystemDecision, ProductivityScore, WorkflowTemplate, Workflow, WorkflowLog, IAActionHistory, UserUsage } from "../types";
+import React, { createContext, useContext, useState, useEffect, ReactNode, useReducer } from "react";
+import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction, IAHistoryItem, FocusSession, UserRole, ScoreBreakdown, SystemDecision, ProductivityScore, WorkflowTemplate, Workflow, WorkflowLog, UserUsage, IAActionHistory } from "../types";
 import { StorageService } from "../services/storage";
-import { supabase } from "../services/supabaseClient";
-import { calculatePriority, sortTasksByDeadline } from "../utils/taskUtils";
+import { sortTasksByDeadline } from "../utils/taskUtils";
 import { ToastMessage } from "../components/Toast";
-import { calculateProductivityScore, calculateScoreBreakdown } from "../utils/productivityScore";
+import { calculateProductivityScore } from "../utils/productivityScore";
 import { getDailyFocus } from "../utils/dailyFocus";
 import { detectPersonality } from "../utils/personalityEngine"; 
-import { generateWeeklyReportData, generateWeeklyReport } from "../utils/weeklyReport"; 
+import { generateWeeklyReport } from "../utils/weeklyReport"; 
 import { useAuth } from "./AuthContext";
-import { getNextTaskSuggestion } from "../utils/taskAnalyzer";
-import { generateReorganizationPlan } from "../utils/weekReorganizer"; 
-import { IAActionEngine } from "../utils/decisionEngine";
+import { IAActionEngine as DecisionEngine } from "../utils/decisionEngine"; // Renamed to avoid conflict
 import { generateDailySummary } from "../utils/dailySummary";
 import { isToday, getHours } from "date-fns";
 import { WorkflowEngine } from "../utils/workflowEngine";
 import { detectBurnout } from "../utils/burnoutDetector";
 import { Permissions } from "../utils/permissions";
-import { checkAILimit, checkWorkflowLimit, PLAN_CONFIG } from "../utils/plans";
+import { checkAILimit, checkWorkflowLimit } from "../utils/plans";
+
+// --- NEW ARCHITECTURE IMPORTS ---
+import { IAActionEngine } from "../engine/IAActionEngine";
+import { AppState, initialState } from "../types/appState";
+import { AppAction } from "../types/actions";
+import { TaskUseCases } from "../useCases/taskUseCases";
 
 type Screen = ViewMode | "login" | "settings";
 
@@ -41,7 +44,10 @@ export interface AppContextData {
   toasts: ToastMessage[];
   addToast: (toast: ToastMessage) => void;
 
-  // Data
+  // Data (Managed by Reducer or Hybrid)
+  events: CalendarEvent[];
+  dispatch: (action: AppAction) => void; // Exposed for Trigger Layer
+  
   tasks: Task[];
   addTask: (title: string, dueDate?: Date) => Promise<void>; 
   addWorkflow: (title: string, steps: string[]) => Promise<void>; 
@@ -51,13 +57,14 @@ export interface AppContextData {
   templates: WorkflowTemplate[]; 
   workflowLogs: WorkflowLog[]; 
   updateTask: (task: Task) => Promise<void>;
-  events: CalendarEvent[];
+  
+  // Legacy Wrapper for Events (for backward compatibility)
   addEvent: (event: Partial<CalendarEvent>) => Promise<void>;
   
   // Profile
   profile: UserProfile | null;
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
-  aiUsage: UserUsage | null; // New
+  aiUsage: UserUsage | null; 
 
   // Teams & Permissions
   teams: Team[];
@@ -74,7 +81,7 @@ export interface AppContextData {
   pendingAction: PendingActionState | null;
   setPendingAction: (action: PendingActionState | null) => void;
   executeIAAction: (action: IAAction, source?: "user" | "ai") => Promise<void>;
-  cancelIAAction: () => Promise<void>; // New: Explicit Cancel
+  cancelIAAction: () => Promise<void>; 
   iaHistory: IAHistoryItem[];
   agentSuggestion: AgentSuggestion | null;
   setAgentSuggestion: (suggestion: AgentSuggestion | null) => void;
@@ -97,8 +104,7 @@ export interface AppContextData {
   markNotificationAsRead: (id: string) => Promise<void>;
   clearAllNotifications: () => Promise<void>;
   generateReport: () => void;
-  
-  // Diagnostics
+  isAuthenticated: boolean;
   isSupabaseConnected: boolean;
 }
 
@@ -107,6 +113,9 @@ const AppContext = createContext<AppContextData>({} as AppContextData);
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user, isLocalMode } = useAuth();
 
+  // --- GLOBAL STATE (S Layer) ---
+  const [state, dispatch] = useReducer(IAActionEngine, initialState);
+
   // UI State
   const [screen, setScreen] = useState<Screen>("day");
   const [isMayaOpen, setMayaOpen] = useState(false);
@@ -114,11 +123,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Data State
+  // Legacy Data State (Gradual Migration)
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  
+  // Events are now managed by Reducer 'state.events'
+  // AgentSuggestion is now managed by Reducer 'state.agentSuggestion'
+
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowLogs, setWorkflowLogs] = useState<WorkflowLog[]>([]);
   const [aiUsage, setAiUsage] = useState<UserUsage | null>(null);
@@ -142,13 +154,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [iaStatus, setIaStatus] = useState<IAStatus>("idle");
   const [messages, setMessages] = useState<IAMessage[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingActionState | null>(null); 
-  const [agentSuggestion, setAgentSuggestion] = useState<AgentSuggestion | null>(null);
   const [iaHistory, setIaHistory] = useState<IAHistoryItem[]>([]);
   const [personality, setPersonality] = useState<PersonalityType>("neutro");
   const [focusSession, setFocusSession] = useState<FocusSession>({ isActive: false, taskId: null, startTime: null, plannedDuration: 25 });
   const [systemDecision, setSystemDecision] = useState<SystemDecision>({ type: 'NONE' });
 
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(true);
+
+  // Wrapper for setAgentSuggestion to update Reducer state
+  const setAgentSuggestion = (suggestion: AgentSuggestion | null) => {
+      dispatch({ type: "SET_SUGGESTION", payload: suggestion });
+  };
 
   // --- 1. Load Data ---
   useEffect(() => {
@@ -164,8 +180,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             StorageService.getTemplates(),
             StorageService.getWorkflowLogs()
         ]);
+        
+        // Hydrate Reducer
+        dispatch({ type: "SET_EVENTS", payload: loadedEvents });
+
         setAllTasks(loadedTasks);
-        setEvents(loadedEvents);
         setProfile(loadedProfile);
         setScoreHistory(loadedHistory);
         setTeams(loadedTeams);
@@ -174,7 +193,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setWorkflowLogs(loadedLogs);
         
         const usage = StorageService.getUsage();
-        // Reset daily usage if needed
         const today = new Date().toISOString().split('T')[0];
         if (usage.lastUsageReset.split('T')[0] !== today) {
             usage.aiSuggestionsToday = 0;
@@ -229,10 +247,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
            dailySummary = generateDailySummary(tasks, iaHistory, scoreDates);
       }
       
-      const nextTask = tasks.filter(t => !t.completed).sort((a,b) => calculatePriority(a) === 'high' ? -1 : 1)[0];
+      const nextTask = tasks.filter(t => !t.completed).sort((a,b) => (a.priority === 'high' ? -1 : 1))[0];
 
       // Run Decision Engine
-      const decision = IAActionEngine.decide({
+      const decision = DecisionEngine.decide({
           hasActiveFocus: focusSession.isActive,
           focusDoneToday,
           pendingTasks: tasks.filter(t => !t.completed),
@@ -243,9 +261,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       setSystemDecision(decision);
 
-      // Check for Burnout (New Logic)
+      // Check for Burnout
       const burnoutAnalysis = detectBurnout(tasks, iaHistory, productivityScore);
-      if (burnoutAnalysis.level === 'high' && !agentSuggestion) {
+      if (burnoutAnalysis.level === 'high' && !state.agentSuggestion) {
           setAgentSuggestion({
               id: 'burnout-risk',
               type: 'warning',
@@ -253,7 +271,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               actionLabel: 'Reorganizar',
               actionData: {
                   type: "REORGANIZE_WEEK",
-                  payload: { changes: [], reason: "Prevenção de Burnout" } // Payload filled by engine logic later
+                  payload: { changes: [], reason: "Prevenção de Burnout" } 
               }
           });
       }
@@ -264,7 +282,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               Date.now() - new Date(h.timestamp).getTime() < 10 * 60 * 1000
           );
           
-          if (!recentSuggestion && !agentSuggestion) {
+          if (!recentSuggestion && !state.agentSuggestion) {
                setAgentSuggestion({
                    id: `next-step-${decision.payload.step.id}`,
                    type: 'workflow_step',
@@ -284,7 +302,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   }, [tasks, iaHistory, focusSession, scoreBreakdown, productivityScore]);
 
-  // Switch Team Logic
   const switchTeam = async (teamId: string | null) => {
       const selected = teams.find(t => t.id === teamId) || null;
       setCurrentTeam(selected);
@@ -310,7 +327,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
   };
 
-  // --- Persist History ---
   useEffect(() => {
       if (iaHistory.length > 0) {
           localStorage.setItem('maya_ia_history', JSON.stringify(iaHistory.slice(-50))); 
@@ -327,7 +343,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [focusSession]);
 
 
-  // --- ACTIONS ---
+  // --- WRAPPERS & TRIGGERS ---
 
   const addToast = (toast: ToastMessage) => {
     setToasts(prev => [...prev, toast]);
@@ -344,15 +360,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const addTask = async (title: string, dueDate?: Date) => {
       if (!user && !isLocalMode) return;
-      const newTask: Task = {
-          id: StorageService.generateId(),
-          title,
-          completed: false,
-          priority: 'medium', 
-          dueDate: dueDate || new Date(),
-          teamId: currentTeam?.id
-      };
-      newTask.priority = calculatePriority(newTask);
+      const newTask = TaskUseCases.create(
+          title, 
+          dueDate, 
+          currentTeam?.id, 
+          StorageService.generateId
+      );
       const saved = await StorageService.saveTask(newTask);
       setAllTasks(prev => [...prev, saved]);
       setTasks(prev => sortTasksByDeadline([...prev, saved]));
@@ -362,19 +375,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addWorkflow = async (title: string, steps: string[]) => {
     if (!user && !isLocalMode) return;
     
-    // Check Permissions (Phase 12)
     if (currentTeam && !Permissions.canEditWorkflow(userRole)) {
         addToast({ id: Date.now().toString(), title: "Permissão Negada", message: "Apenas gerentes podem criar fluxos.", type: "error" });
         return;
     }
 
-    // Check Plan Limit (Phase O)
     if (profile && aiUsage) {
         if (!checkWorkflowLimit(profile.plan, aiUsage.workflowsCount)) {
             addToast({ id: Date.now().toString(), title: "Limite do Plano", message: `Upgrade necessário para criar mais fluxos.`, type: "error" });
             return;
         }
-        // Increment workflow count
         const newUsage = { ...aiUsage, workflowsCount: aiUsage.workflowsCount + 1 };
         StorageService.saveUsage(newUsage);
         setAiUsage(newUsage);
@@ -382,17 +392,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const stepsData = steps.map(s => ({ title: s }));
     const workflow = WorkflowEngine.createTemplate(title, stepsData);
-    workflow.ownerId = user?.id; // Assign owner
+    workflow.ownerId = user?.id; 
 
-    const newTask: Task = {
-        id: StorageService.generateId(),
-        title: title,
-        completed: false,
-        priority: 'medium',
-        dueDate: new Date(),
-        workflow: workflow, 
-        teamId: currentTeam?.id
-    };
+    const newTask = TaskUseCases.create(title, undefined, currentTeam?.id, StorageService.generateId);
+    newTask.workflow = workflow;
     
     const saved = await StorageService.saveTask(newTask);
     setAllTasks(prev => [...prev, saved]);
@@ -401,23 +404,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     addToast({ id: Date.now().toString(), title: "Fluxo Criado", message: "Novo processo iniciado.", type: "success" });
   };
 
-  // Safe Workflow Advance with Logging
   const advanceWorkflow = async (task: Task, stepId: string) => {
       if (!task.workflow) return;
 
-      // 1. Logic Update
       const updatedWorkflow = WorkflowEngine.completeStep(task.workflow, stepId);
       
-      const updatedTask = {
-          ...task,
+      const updatedTask = TaskUseCases.update(task, {
           workflow: updatedWorkflow,
           completed: updatedWorkflow.status === 'completed'
-      };
+      });
 
-      // 2. Database Update
       await updateTask(updatedTask);
 
-      // 3. Audit Log (Side Effect)
       const logEntry: WorkflowLog = {
           id: StorageService.generateId(),
           workflowId: updatedWorkflow.id,
@@ -460,13 +458,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
   };
 
+  // --- TRIGGER: ADD EVENT (Wraps Dispatch + Persistence) ---
   const addEvent = async (eventData: Partial<CalendarEvent>) => {
       if (!user && !isLocalMode) return;
+      
       const newEvent: CalendarEvent = {
           id: eventData.id || StorageService.generateId(),
           title: eventData.title || "Novo Evento",
           start: eventData.start || new Date(),
-          end: eventData.end || new Date(),
+          end: eventData.end || new Date(new Date().getTime() + 3600000),
           color: eventData.color || 'blue',
           category: eventData.category || 'work',
           completed: false,
@@ -474,8 +474,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           description: eventData.description,
           location: eventData.location
       };
+
+      // 1. Dispatch (Update UI State)
+      dispatch({ type: "CREATE_EVENT", payload: newEvent });
+
+      // 2. Persist (Side Effect)
       await StorageService.saveEvent(newEvent);
-      setEvents(prev => [...prev, newEvent]);
   };
 
   const addMessage = (message: IAMessage) => {
@@ -483,7 +487,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const generateReport = () => {
-      // Manual trigger uses default text generation
       const reportText = generateWeeklyReport(tasks, scoreHistory, iaHistory);
       StorageService.saveNotification("Relatório Semanal Disponível");
       addMessage({ id: Date.now().toString(), sender: 'maya', text: reportText });
@@ -519,7 +522,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (focusSession.taskId && completed) {
           const task = tasks.find(t => t.id === focusSession.taskId);
           if (task) {
-              await updateTask({ ...task, completed: true });
+              const updatedTask = TaskUseCases.update(task, { completed: true });
+              await updateTask(updatedTask);
           }
       }
       setIaHistory(prev => [
@@ -529,17 +533,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setFocusSession({ isActive: false, taskId: null, startTime: null, plannedDuration: 25 });
   };
 
-  // Explicit Cancel Function for IA Confirmation
   const cancelIAAction = async () => {
       if (!pendingAction) return;
-      
       const { originalAction } = pendingAction;
       
-      // If it's a workflow step, log the cancellation
       if (originalAction.type === 'COMPLETE_STEP') {
           const { taskId, stepId } = originalAction.payload;
           const task = tasks.find(t => t.id === taskId);
-          
           if (task && task.workflow) {
               const newHistoryItem: IAActionHistory = {
                   id: StorageService.generateId(),
@@ -548,26 +548,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                   timestamp: new Date().toISOString(),
                   details: `Step ${stepId} cancelled by user`
               };
-              
               const updatedWf = {
                   ...task.workflow,
                   iaHistory: [...(task.workflow.iaHistory || []), newHistoryItem]
               };
-              
               const updatedTask = { ...task, workflow: updatedWf };
               await updateTask(updatedTask);
           }
       }
-      
       setPendingAction(null);
       addMessage({ id: Date.now().toString(), sender: 'maya', text: "Ação cancelada." });
   };
 
   const executeIAAction = async (action: IAAction, source: "user" | "ai" = "ai") => {
     
-    // Plan Limit Check for AI Suggestions
     if (source === 'ai' && profile && aiUsage) {
-        // We consider every AI execution a "suggestion usage" if it came from the AI
         const limitCheck = checkAILimit(profile.plan, aiUsage);
         if (!limitCheck.allowed) {
             addMessage({ 
@@ -577,7 +572,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             });
             return;
         }
-        // Increment usage
         const newUsage = { ...aiUsage, aiSuggestionsToday: aiUsage.aiSuggestionsToday + 1 };
         StorageService.saveUsage(newUsage);
         setAiUsage(newUsage);
@@ -603,6 +597,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 location: action.payload.location
             });
             break;
+        case "UPDATE_EVENT":
+            const { eventId, start, end } = action.payload;
+            const targetEvent = state.events.find(e => e.id === eventId);
+            if (targetEvent) {
+                // Dispatch locally
+                dispatch({ 
+                    type: "MOVE_EVENT", 
+                    payload: { eventId, newStart: new Date(start), newEnd: new Date(end) } 
+                });
+                // Persist
+                await StorageService.saveEvent({ ...targetEvent, start: new Date(start), end: new Date(end) });
+                addToast({ id: Date.now().toString(), title: "Evento Atualizado", message: "Horário ajustado com sucesso.", type: "success" });
+            }
+            break;
         case "RESCHEDULE_TASK":
              const { taskId, taskIds, newDate } = action.payload;
              const ids = taskIds || (taskId ? [taskId] : []);
@@ -616,19 +624,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (changes) {
                 for (const change of changes) {
                     const task = tasks.find(t => t.id === change.taskId);
-                    if (task) await updateTask({ ...task, dueDate: new Date(change.to) });
+                    if (task) {
+                        await updateTask({ ...task, dueDate: new Date(change.to) });
+                    }
                 }
                 addToast({ id: Date.now().toString(), title: "Reorganizado", message: "Semana ajustada com sucesso.", type: "success" });
             }
             break;
-        case "COMPLETE_STEP": // AI Automation
+        case "COMPLETE_STEP": 
              const { taskId: tId, stepId } = action.payload;
              const targetTask = tasks.find(t => t.id === tId);
              
              if (targetTask && targetTask.workflow) {
                  await advanceWorkflow(targetTask, stepId);
                  
-                 // Log AI confirmation history in the Workflow object itself (Confirmed = true)
                  if (source === 'ai') {
                      const newHistoryItem: IAActionHistory = {
                          id: StorageService.generateId(),
@@ -679,14 +688,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              setMayaOpen(true);
              break;
         case "PROPOSE_WORKFLOW":
-             // AI proposes a workflow -> Trigger confirmation to create it
              setPendingAction({
                  originalAction: action,
                  question: `Posso criar o fluxo de trabalho "${action.payload.title}" com ${action.payload.steps.length} etapas?\n\nEtapas:\n${action.payload.steps.map((s, i) => `${i+1}. ${s}`).join('\n')}`
              });
              break;
         case "SEND_REPORT":
-             // Simulate Email Sending via Notification/Toast
              StorageService.saveNotification(`Relatório Semanal enviado para ${profile?.email}`);
              addToast({ id: Date.now().toString(), title: "Relatório Enviado", message: "Verifique seu email.", type: "success" });
              break;
@@ -698,15 +705,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const executeIAActionExpanded = async (action: IAAction, source: "user" | "ai" = "ai") => {
-      // Intercept creation
       if (action.type === 'PROPOSE_WORKFLOW') {
-          // If we are here, it means confirmed
           await addWorkflow(action.payload.title, action.payload.steps);
-          // Toast handled inside addWorkflow
           return;
       }
       
-      // Fallback to original
       await executeIAAction(action, source);
   };
 
@@ -719,6 +722,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isNotificationsOpen, setNotificationsOpen,
         toasts, addToast,
         profile, updateProfile, aiUsage,
+        events: state.events, dispatch, // Exposed S & T
         tasks, addTask, updateTask,
         addWorkflow,
         saveWorkflowAsTemplate,
@@ -726,23 +730,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         advanceWorkflow,
         templates,
         workflowLogs,
-        events, addEvent,
+        addEvent,
         iaStatus, setIaStatus,
         messages, addMessage,
         pendingAction, setPendingAction,
-        executeIAAction: executeIAActionExpanded, // Use the wrapper
+        executeIAAction: executeIAActionExpanded, 
         cancelIAAction,
         iaHistory,
-        agentSuggestion, setAgentSuggestion,
+        agentSuggestion: state.agentSuggestion, setAgentSuggestion, // Now linked to state
         productivityScore, scoreBreakdown, scoreHistory, dailyFocus,
         notifications, unreadNotifications: notifications.filter(n => !n.read).length,
         markNotificationAsRead,
         clearAllNotifications,
         teams, currentTeam, switchTeam, userRole, 
-        canEditWorkflow: Permissions.canEditWorkflow(userRole), // Permission exposure
+        canEditWorkflow: Permissions.canEditWorkflow(userRole),
         personality,
         generateReport,
         isSupabaseConnected,
+        isAuthenticated: !!user || isLocalMode,
         focusSession, endFocusSession,
         systemDecision 
       }}

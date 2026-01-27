@@ -303,6 +303,14 @@ export type IAAction =
       };
     }
   | {
+      type: "UPDATE_EVENT";
+      payload: {
+        eventId: string;
+        start: string;
+        end: string;
+      };
+    }
+  | {
       type: "RESCHEDULE_TASK";
       payload: {
         taskId?: string;
