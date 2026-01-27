@@ -203,14 +203,24 @@ export interface WeeklyStats {
 }
 
 // --- REPORTING ---
-export interface WeeklyReportData {
+export interface BurnoutRisk {
   week: string;
-  totalCompletedSteps: number;
-  productivityScore: number;
-  burnoutAlerts: number;
-  summary: string;
+  level: "LOW" | "MEDIUM" | "HIGH";
+  signals: string[];
+}
+
+export interface WeeklyReportData {
+  userId: string;
+  week: string;
+  score: number;
+  burnoutRisk: BurnoutRisk;
   highlights: string[];
   suggestions: string[];
+  // Legacy fields for compatibility
+  totalCompletedSteps?: number;
+  productivityScore?: number;
+  burnoutAlerts?: number;
+  summary?: string;
 }
 
 // --- SCORE SYSTEM ---
@@ -259,6 +269,7 @@ export type SystemDecision =
   | { type: 'EXPLAIN_SCORE' }
   | { type: 'SUGGEST_NEXT_STEP'; payload: { workflowId: string; workflowTitle: string; step: WorkflowStep } }
   | { type: 'BURNOUT_ALERT'; payload: { riskLevel: 'medium' | 'high'; message: string } } 
+  | { type: 'PRIORITY_MEDIATION'; payload: PriorityMediation }
   | { type: 'NONE' };
 
 export interface IAContext {
@@ -275,7 +286,9 @@ export interface TaskChange {
     taskId: string;
     taskTitle: string;
     from: string; 
-    to: string;   
+    to: string;
+    reason?: string;
+    benefit?: string;
 }
 
 export interface NegotiationOption {
@@ -442,8 +455,22 @@ export interface AgentSuggestion {
 export interface QuarterlyGoal {
     id: string;
     title: string;
+    description?: string;
     achieved: boolean;
     quarter: string;
-    metric?: string; 
-    targetValue?: string;
+    metrics?: {
+        targetScore?: number;
+        maxBurnoutLevel?: "LOW" | "MEDIUM" | "HIGH";
+        targetValue?: string;
+        metricType?: string;
+    };
+    progress?: number;
+}
+
+export interface PriorityMediation {
+  taskId: string;
+  requester: string;
+  impactedUsers: string[];
+  suggestedPriority: "low" | "medium" | "high";
+  justification: string;
 }

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
-import { X, Moon, Sun, Bell, User, FileText, Key, Eye, EyeOff, CheckCircle, LogOut, CreditCard, Zap, ShieldCheck, Activity } from 'lucide-react';
+import { X, Moon, Sun, Bell, User, FileText, Key, Eye, EyeOff, CheckCircle, LogOut, CreditCard, Zap, ShieldCheck, Save, Camera, Phone, Mail } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { getPlanName, PLAN_CONFIG } from '../utils/plans';
@@ -23,6 +23,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
   const [keySaved, setKeySaved] = useState(false);
   const [isValidFormat, setIsValidFormat] = useState(true);
   const [activeTab, setActiveTab] = useState<'general' | 'audit'>('general');
+
+  // Local state for profile editing
+  const [editForm, setEditForm] = useState({
+      name: '',
+      phone: '',
+      avatarUrl: ''
+  });
+
+  useEffect(() => {
+      if (profile) {
+          setEditForm({
+              name: profile.name || '',
+              phone: profile.phone || '',
+              avatarUrl: profile.avatarUrl || ''
+          });
+      }
+  }, [profile]);
 
   useEffect(() => {
       const storedKey = localStorage.getItem('maya_api_key');
@@ -50,6 +67,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
       } else {
           localStorage.removeItem('maya_api_key');
       }
+  };
+
+  const handleSaveProfile = () => {
+      onSaveProfile({
+          name: editForm.name,
+          phone: editForm.phone,
+          avatarUrl: editForm.avatarUrl
+      });
   };
 
   if (!isOpen) return null;
@@ -86,15 +111,83 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
         <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50 dark:bg-black/20">
             {activeTab === 'general' ? (
                 <div className="space-y-6">
-                    {/* User Profile */}
-                    <div className="flex items-center gap-4 p-4 bg-white dark:bg-zinc-800 border border-gray-100 dark:border-white/5 rounded-2xl">
-                        <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
-                            {profile.avatarUrl ? <img src={profile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <User size={32} className="text-gray-400" />}
-                        </div>
-                        <div>
-                            <h3 className="font-semibold dark:text-white">{profile.name}</h3>
-                            <p className="text-sm text-gray-500">{profile.email}</p>
-                            <p className="text-xs text-custom-caramel mt-1 font-bold uppercase">{currentTeam ? `Equipe: ${currentTeam.name}` : "Modo Pessoal"}</p>
+                    {/* User Profile Editing */}
+                    <div className="bg-white dark:bg-zinc-800 border border-gray-100 dark:border-white/5 rounded-2xl p-5">
+                        <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                            <User size={18} /> Perfil do Usuário
+                        </h3>
+                        
+                        <div className="flex flex-col md:flex-row gap-6">
+                            {/* Avatar Section */}
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="w-24 h-24 rounded-full bg-gray-200 dark:bg-white/10 flex items-center justify-center overflow-hidden border-4 border-white dark:border-zinc-700 shadow-md relative group">
+                                    {editForm.avatarUrl ? (
+                                        <img src={editForm.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <User size={40} className="text-gray-400" />
+                                    )}
+                                </div>
+                                <div className="w-full">
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">URL da Foto</label>
+                                    <div className="flex items-center gap-2 bg-gray-50 dark:bg-black/20 rounded-lg border border-gray-200 dark:border-white/10 px-2 py-1.5">
+                                        <Camera size={14} className="text-gray-400" />
+                                        <input 
+                                            type="text"
+                                            value={editForm.avatarUrl}
+                                            onChange={(e) => setEditForm({...editForm, avatarUrl: e.target.value})}
+                                            placeholder="https://..."
+                                            className="bg-transparent w-full text-xs outline-none dark:text-white"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Inputs Section */}
+                            <div className="flex-1 space-y-4">
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Nome Completo</label>
+                                    <input 
+                                        type="text"
+                                        value={editForm.name}
+                                        onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                                        className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2.5 outline-none focus:border-custom-caramel dark:text-white transition-all"
+                                        placeholder="Seu nome"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block flex items-center gap-1">
+                                            <Mail size={12} /> Email (Login)
+                                        </label>
+                                        <input 
+                                            type="text"
+                                            value={profile.email}
+                                            disabled
+                                            className="w-full bg-gray-100 dark:bg-white/5 border border-transparent rounded-xl px-4 py-2.5 outline-none text-gray-500 cursor-not-allowed"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block flex items-center gap-1">
+                                            <Phone size={12} /> Telefone
+                                        </label>
+                                        <input 
+                                            type="text"
+                                            value={editForm.phone}
+                                            onChange={(e) => setEditForm({...editForm, phone: e.target.value})}
+                                            className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2.5 outline-none focus:border-custom-caramel dark:text-white transition-all"
+                                            placeholder="(00) 00000-0000"
+                                        />
+                                    </div>
+                                </div>
+
+                                <button 
+                                    onClick={handleSaveProfile}
+                                    className="w-full md:w-auto px-6 py-2 bg-custom-soil text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-custom-caramel transition-colors shadow-sm ml-auto"
+                                >
+                                    <Save size={16} /> Salvar Alterações
+                                </button>
+                            </div>
                         </div>
                     </div>
 

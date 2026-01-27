@@ -115,13 +115,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onL
               <Settings size={20} />
               <span>Configurações</span>
             </button>
-            <button 
-              onClick={onLogout}
-              className="w-full flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
-            >
-              <LogOut size={20} />
-              <span>Sair</span>
-            </button>
           </div>
         </div>
 

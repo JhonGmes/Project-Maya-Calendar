@@ -20,7 +20,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClick, onAddTask, onToggleTask }) => {
-  const { productivityScore, scoreBreakdown, scoreHistory, systemDecision, isSupabaseConnected, isAuthenticated, executeIAAction, currentTeam, userRole, iaHistory } = useApp();
+  const { productivityScore, scoreBreakdown, scoreHistory, systemDecision, isSupabaseConnected, isAuthenticated, executeIAAction, currentTeam, userRole, iaHistory, profile } = useApp();
   const [showScoreDetails, setShowScoreDetails] = useState(false);
 
   // Executive View Conditions
@@ -96,7 +96,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
       <header className="mb-6 flex justify-between items-end relative">
         <div>
             <h2 className="text-3xl md:text-4xl font-serif font-bold text-custom-soil dark:text-white mb-1 animate-slide-up">
-            {getGreeting()}, <span className="opacity-60">{currentTeam ? `Gestor` : 'Usuário'}</span>
+            {getGreeting()}, <span className="opacity-60">{profile?.name ? profile.name : (currentTeam ? 'Gestor' : 'Usuário')}</span>
             </h2>
             <div className="flex items-center gap-2 animate-slide-up" style={{animationDelay: '0.1s'}}>
                 <p className="text-gray-500 dark:text-gray-400 text-sm">

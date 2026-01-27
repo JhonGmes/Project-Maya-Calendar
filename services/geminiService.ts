@@ -129,16 +129,18 @@ export const chatWithMaya = async (
     `;
 
     const config: any = {
-         systemInstruction: systemPrompt,
-         responseMimeType: "application/json"
+         systemInstruction: systemPrompt
     };
 
     // Configure Thinking Mode
     if (mode === 'thinking') {
         config.thinkingConfig = { thinkingBudget: 32768 };
-        // IMPORTANT: maxOutputTokens must NOT be set when using thinkingConfig with this budget.
+        // IMPORTANT: When using thinkingConfig, we CANNOT force responseMimeType to 'application/json' 
+        // in some contexts because the thought trace is text. The prompt handles the JSON structure.
+        // Also, maxOutputTokens must NOT be set.
     } else {
-        // Only set for non-thinking models
+        // Standard Mode
+        config.responseMimeType = "application/json";
         config.maxOutputTokens = 8192;
     }
 

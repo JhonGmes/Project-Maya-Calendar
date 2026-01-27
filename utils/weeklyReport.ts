@@ -1,6 +1,5 @@
-
 import { Task, ScoreHistory, IAHistoryItem, WeeklyReportData } from '../types';
-import { detectBurnout } from './burnoutDetector';
+import { calculateBurnoutRisk } from './burnoutDetector';
 import { calculateScore } from './productivityScore';
 import { subDays } from 'date-fns';
 
@@ -10,62 +9,62 @@ export function generateWeeklyReportData(
     iaHistory: IAHistoryItem[] = []
 ): WeeklyReportData {
   
-  // Basic Metrics
-  const completedSteps = tasks.reduce((acc, t) => {
-      return acc + (t.workflow ? t.workflow.steps.filter(s => s.status === 'completed').length : (t.completed ? 1 : 0));
-  }, 0);
-
-  const currentScore = calculateScore(tasks, iaHistory);
-  const burnout = detectBurnout(tasks, iaHistory, currentScore);
-  const burnoutAlerts = burnout.level === 'high' ? 1 : 0;
-
-  // Analysis for Highlights & Suggestions
   const now = new Date();
   const oneWeekAgo = subDays(now, 7);
   const recentHistory = iaHistory.filter(h => new Date(h.timestamp) > oneWeekAgo);
   
-  const conflictsResolved = recentHistory.filter(h => h.action.type === 'REORGANIZE_WEEK').length;
-  const focusMinutes = recentHistory.filter(h => h.action.type === 'END_FOCUS' && h.action.payload.completed).length * 25;
-  const avgFocus = Math.round(focusMinutes / 7); // Daily avg
+  // 1. Metrics Calculation
+  const currentScore = calculateScore(tasks, iaHistory);
+  const burnout = calculateBurnoutRisk(tasks, iaHistory, currentScore);
+  
+  const conflictsResolved = recentHistory.filter(h => 
+      h.action.type === 'REORGANIZE_WEEK' || h.action.type === 'UPDATE_EVENT' // Assuming UPDATE_EVENT often resolves conflict
+  ).length;
 
+  const focusSessions = recentHistory.filter(h => h.action.type === 'END_FOCUS' && h.action.payload.completed);
+  const totalFocusMinutes = focusSessions.length * 25;
+  const avgFocus = focusSessions.length > 0 ? 25 : 0; // Simplified assumption: standard 25m sessions
+
+  // 2. Highlights Generation
   const highlights: string[] = [];
-  if (conflictsResolved > 0) highlights.push(`Você reorganizou sua agenda ${conflictsResolved} vezes para otimizar o tempo.`);
-  if (focusMinutes > 120) highlights.push(`Manteve um total de ${Math.round(focusMinutes/60)} horas de foco profundo.`);
-  if (completedSteps > 5) highlights.push(`Avançou em ${completedSteps} etapas importantes de projetos.`);
-  if (currentScore > 80) highlights.push("Manteve consistência de Alta Performance (Score > 80).");
-
-  if (highlights.length === 0) highlights.push("Semana de manutenção. O foco foi em tarefas rotineiras.");
-
-  const suggestions: string[] = [];
-  if (burnout.level === 'high') {
-      suggestions.push("Prioridade máxima: Reduza a carga horária na próxima semana.");
-      suggestions.push("Tente delegar ou adiar tarefas não críticas de segunda-feira.");
-  } else if (burnout.level === 'medium') {
-      suggestions.push("Agrupe suas reuniões em blocos para evitar interrupções.");
-      suggestions.push("Evite agendar tarefas complexas após as 18h.");
-  } else {
-      suggestions.push("Continue com blocos de foco de 25-50 minutos.");
-      suggestions.push("Que tal desafiar-se com um projeto mais complexo na próxima semana?");
+  if (conflictsResolved > 0) {
+      highlights.push(`Você resolveu ${conflictsResolved} conflitos de agenda`);
+  }
+  if (totalFocusMinutes > 0) {
+      highlights.push(`Manteve foco total de ${Math.round(totalFocusMinutes/60)} horas`);
+  }
+  if (currentScore > 80) {
+      highlights.push("Manteve alta performance (Score > 80)");
   }
 
-  // Summary Text
-  let summary = "";
+  // 3. Suggestions Generation based on Burnout
+  const suggestions: string[] = [];
   if (burnout.level === 'high') {
-      summary = `Carga crítica detectada. Seu score foi ${currentScore}, mas o custo operacional está alto. ${burnout.signals[0]}`;
-  } else if (currentScore > 80) {
-      summary = `Semana de elite! Score ${currentScore}. Você equilibrou perfeitamente execução e foco.`;
+      suggestions.push("Reduzir tarefas após 18h");
+      suggestions.push("Agrupar reuniões em blocos");
+  } else if (burnout.level === 'medium') {
+      suggestions.push("Começar a semana com blocos maiores de foco");
+      suggestions.push("Evitar multitarefa em horários de pico");
   } else {
-      summary = `Semana com score ${currentScore}. ${highlights[0]}`;
+      suggestions.push("Manter o ritmo atual, você está bem!");
   }
 
   return {
+      userId: 'current-user', // Should come from context usually
       week: new Date().toISOString(),
-      totalCompletedSteps: completedSteps,
-      productivityScore: currentScore,
-      burnoutAlerts,
-      summary,
+      score: currentScore,
+      productivityScore: currentScore, // Legacy compat
+      burnoutRisk: {
+          week: new Date().toISOString(),
+          level: burnout.level === 'low' ? 'LOW' : burnout.level === 'medium' ? 'MEDIUM' : 'HIGH',
+          signals: burnout.signals
+      },
       highlights,
-      suggestions
+      suggestions,
+      // Legacy fields
+      totalCompletedSteps: tasks.filter(t => t.completed).length,
+      burnoutAlerts: burnout.level === 'high' ? 1 : 0,
+      summary: `Esta semana seu score foi ${currentScore}. ${burnout.reason}`
   };
 }
 
@@ -76,21 +75,18 @@ export function generateWeeklyReport(
     iaHistory: IAHistoryItem[] = []
 ): string {
     const report = generateWeeklyReportData(tasks, scoreHistory, iaHistory);
+    
+    // Formatting as requested
     return `
-📊 **Relatório Semanal Maya**
+Seu resumo da semana com a Maya
 
-**Resumo:**
-${report.summary}
+Esta semana seu score foi ${report.score}.
+${report.burnoutRisk.level === 'HIGH' ? '⚠️ Risco alto de burnout.' : 'Você avançou bem.'}
 
-**Destaques:**
+Pontos fortes
 ${report.highlights.map(h => `• ${h}`).join('\n')}
 
-**Sugestões:**
-${report.suggestions.map(s => `👉 ${s}`).join('\n')}
-
-**Métricas:**
-🏆 Score: ${report.productivityScore}
-✅ Entregas: ${report.totalCompletedSteps}
-${report.burnoutAlerts > 0 ? `🔴 Alerta de Sobrecarga` : '🟢 Saúde Operacional: Estável'}
+Sugestão principal
+${report.suggestions[0] || "Continue assim!"}
 `;
 }

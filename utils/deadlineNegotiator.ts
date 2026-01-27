@@ -26,27 +26,26 @@ export function checkDeadlineViability(
     const dayName = format(proposedDate, "EEEE", { locale: ptBR });
     const formattedDate = format(proposedDate, "dd/MM");
     
-    // Option A: Force (Keep original plan)
+    // Option A: Advance/Prioritize (Adiantar/Forçar)
     const optForce: NegotiationOption = {
-        label: "Manter (Vou me esforçar)",
+        label: "Adiantar uma (Priorizar esta)",
         style: 'outline',
         action: {
             type: "CREATE_TASK",
             payload: {
                 title: newTaskTitle,
                 dueDate: proposedDate.toISOString(),
-                priority: 'high' // If forcing, assume high priority
+                priority: 'high'
             }
         }
     };
 
-    // Option B: Postpone +2 Days
+    // Option B: Postpone +2 Days (Estender prazo)
     const nextDate = addDays(proposedDate, 2);
-    // Skip weekend if landed on one? (Simple logic: just push)
-    if (nextDate.getDay() === 0) nextDate.setDate(nextDate.getDate() + 1); // Sunday -> Monday
+    if (nextDate.getDay() === 0) nextDate.setDate(nextDate.getDate() + 1); // Skip Sunday
 
     const optPostpone: NegotiationOption = {
-        label: `Adiar para ${format(nextDate, "EEEE (dd/MM)", { locale: ptBR })}`,
+        label: `Estender prazo para ${format(nextDate, "EEEE (dd/MM)", { locale: ptBR })}`,
         style: 'primary',
         action: {
             type: "CREATE_TASK",
@@ -58,15 +57,15 @@ export function checkDeadlineViability(
         }
     };
 
-    // Option C: Backlog
-    const optBacklog: NegotiationOption = {
-        label: "Colocar no Backlog (Sem data)",
+    // Option C: Redistribute (Redistribuir na semana)
+    const optRedistribute: NegotiationOption = {
+        label: "Redistribuir semana (Automático)",
         style: 'secondary',
         action: {
-            type: "CREATE_TASK",
+            type: "REORGANIZE_WEEK",
             payload: {
-                title: newTaskTitle,
-                // No due date
+                changes: [], // Logic handled by backend/util
+                reason: "Redistribuição solicitada pelo usuário durante negociação."
             }
         }
     };
@@ -75,8 +74,8 @@ export function checkDeadlineViability(
         type: "NEGOTIATE_DEADLINE",
         payload: {
             taskTitle: newTaskTitle,
-            reason: `Você tem ${dayTasks.length} tarefas críticas para ${dayName}. Adicionar mais uma gera risco de sobrecarga. Como prefere lidar?`,
-            options: [optPostpone, optBacklog, optForce]
+            reason: `Você tem ${dayTasks.length} tarefas críticas para ${dayName}. Pelo seu histórico, adicionar mais uma gera risco de sobrecarga. Como prefere lidar?`,
+            options: [optForce, optPostpone, optRedistribute]
         }
     };
 }

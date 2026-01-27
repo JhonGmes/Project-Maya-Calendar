@@ -1,6 +1,7 @@
 
 import { Task, TaskChange } from '../types';
-import { addDays } from 'date-fns';
+import { addDays, format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 /**
  * Gera um plano de reorganização movendo tarefas de dias cheios para o dia seguinte.
@@ -43,11 +44,15 @@ export function generateReorganizationPlan(tasks: Task[]): { changes: TaskChange
               
               nextDay.setHours(9, 0, 0, 0);
 
+              const fromDayName = format(currentDueDate, "EEEE", { locale: ptBR });
+              
               changes.push({
                   taskId: task.id,
                   taskTitle: task.title,
                   from: currentDueDate.toISOString(),
-                  to: nextDay.toISOString()
+                  to: nextDay.toISOString(),
+                  reason: `Sobrecarga na ${fromDayName} (> ${MAX_TASKS_PER_DAY} tarefas).`,
+                  benefit: "Melhora o foco e evita burnout."
               });
           });
       }
