@@ -1,17 +1,19 @@
 
 import React, { useState } from 'react';
-import { CalendarEvent } from '../types';
+import { CalendarEvent, Task } from '../types';
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, format, isToday, addMonths, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, CheckCircle2, Circle, Sun, Clock } from 'lucide-react';
 
 interface CalendarGridProps {
   events: CalendarEvent[];
+  tasks: Task[];
   onDateClick: (date: Date) => void;
   onEventClick: (event: CalendarEvent) => void;
+  onTaskClick?: (task: Task) => void;
 }
 
-export const CalendarGrid: React.FC<CalendarGridProps> = ({ events, onDateClick, onEventClick }) => {
+export const CalendarGrid: React.FC<CalendarGridProps> = ({ events, tasks, onDateClick, onEventClick, onTaskClick }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   
   const monthStart = startOfMonth(currentDate);
@@ -70,63 +72,104 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({ events, onDateClick,
       <div className="flex-1 grid grid-cols-7 grid-rows-5 gap-0.5 md:gap-2 overflow-y-auto">
         {calendarDays.map((day, idx) => {
           const dayEvents = events.filter(e => isSameDay(new Date(e.start), day));
+          const dayTasks = tasks.filter(t => t.dueDate && isSameDay(new Date(t.dueDate), day));
+          
           const isCurrentMonth = isSameMonth(day, monthStart);
+          
+          // Combine counts for overflow logic
+          const totalItems = dayEvents.length + dayTasks.length;
+          const maxVisible = 4;
 
           return (
             <div 
               key={day.toISOString()} 
               onClick={() => onDateClick(day)}
               className={`
-                relative p-1 md:p-2 rounded-lg md:rounded-xl border border-transparent transition-all cursor-pointer group flex flex-col min-h-[80px]
+                relative p-1 md:p-2 rounded-lg md:rounded-xl border border-transparent transition-all cursor-pointer group flex flex-col min-h-[100px]
                 ${!isCurrentMonth ? 'bg-gray-50/50 dark:bg-white/5 opacity-40' : 'bg-white/40 dark:bg-white/5 hover:bg-white/60 dark:hover:bg-white/10 hover:shadow-md'}
                 ${isToday(day) ? 'ring-1 md:ring-2 ring-custom-caramel ring-offset-1 md:ring-offset-2 dark:ring-offset-black' : ''}
               `}
             >
               <div className="flex justify-between items-center mb-1">
                 <span className={`
-                    text-xs md:text-sm font-medium w-5 h-5 md:w-7 md:h-7 flex items-center justify-center rounded-full
+                    text-xs md:text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full
                     ${isToday(day) ? 'bg-custom-soil text-white' : 'text-gray-700 dark:text-gray-300'}
                 `}>
                     {format(day, 'd')}
                 </span>
-                {dayEvents.length > 0 && <span className="text-[9px] text-gray-400 font-mono hidden md:inline">{dayEvents.length}</span>}
+                {totalItems > 0 && <span className="text-[9px] text-gray-400 font-mono hidden md:inline">{totalItems}</span>}
               </div>
 
-              <div className="space-y-0.5 md:space-y-1 overflow-hidden flex-1">
-                {dayEvents.slice(0, 3).map(event => (
+              <div className="space-y-1 overflow-hidden flex-1">
+                
+                {/* 1. Render Events (Agendamentos & Rotinas) */}
+                {dayEvents.slice(0, maxVisible).map(event => (
                   <div 
                     key={event.id}
                     onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
                     className={`
-                        truncate rounded-sm md:rounded-md cursor-pointer hover:brightness-95 transition-filter
-                        hidden md:block px-1.5 py-0.5 text-[10px] border-l-2
+                        truncate rounded-md cursor-pointer hover:brightness-95 transition-filter
+                        hidden md:flex items-center gap-1 px-1.5 py-0.5 text-[10px] border-l-2
                         ${event.color === 'blue' ? 'bg-blue-100/80 border-blue-500 text-blue-900' : ''}
                         ${event.color === 'green' ? 'bg-green-100/80 border-green-500 text-green-900' : ''}
                         ${event.color === 'red' ? 'bg-red-100/80 border-red-500 text-red-900' : ''}
                         ${event.color === 'yellow' ? 'bg-yellow-100/80 border-yellow-500 text-yellow-900' : ''}
-                        ${!['blue','green','red','yellow'].includes(event.color) ? 'bg-gray-100 border-gray-500 text-gray-900' : ''}
+                        ${event.color === 'purple' ? 'bg-purple-100/80 border-purple-500 text-purple-900' : ''}
+                        ${event.color === 'orange' ? 'bg-orange-100/80 border-orange-500 text-orange-900' : ''}
+                        ${!['blue','green','red','yellow', 'purple', 'orange'].includes(event.color) ? 'bg-gray-100 border-gray-500 text-gray-900' : ''}
                     `}
                   >
-                    {event.title}
+                    {/* Icon distinction for Routines */}
+                    {event.category === 'routine' && <Sun size={8} className="flex-shrink-0 opacity-70" />}
+                    {event.category !== 'routine' && <Clock size={8} className="flex-shrink-0 opacity-70" />}
+                    <span className="truncate">{event.title}</span>
                   </div>
                 ))}
+
+                {/* 2. Render Tasks (Tarefas) */}
+                {dayTasks.slice(0, Math.max(0, maxVisible - dayEvents.length)).map(task => (
+                    <div 
+                        key={task.id}
+                        onClick={(e) => { e.stopPropagation(); if(onTaskClick) onTaskClick(task); }}
+                        className={`
+                            hidden md:flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] rounded-md border 
+                            cursor-pointer hover:bg-gray-50 dark:hover:bg-white/10 transition-colors
+                            ${task.completed 
+                                ? 'bg-gray-100/50 text-gray-400 border-transparent line-through decoration-gray-400' 
+                                : 'bg-white dark:bg-black/20 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-white/10'}
+                        `}
+                    >
+                        {task.completed ? (
+                            <CheckCircle2 size={8} className="text-green-500 flex-shrink-0" />
+                        ) : (
+                            <Circle size={8} className="text-gray-400 flex-shrink-0" />
+                        )}
+                        <span className="truncate">{task.title}</span>
+                    </div>
+                ))}
                 
-                {/* Mobile View: Dots only for events */}
+                {/* Mobile View: Simple Dots */}
                 <div className="md:hidden flex flex-wrap gap-0.5 mt-1 justify-center">
                     {dayEvents.map(event => (
                         <div 
                             key={event.id}
                             className={`w-1.5 h-1.5 rounded-full ${
-                                event.color === 'blue' ? 'bg-blue-500' : 
-                                event.color === 'red' ? 'bg-red-500' :
-                                event.color === 'green' ? 'bg-green-500' : 'bg-yellow-500'
+                                event.category === 'routine' ? 'bg-orange-400' : 'bg-blue-500'
                             }`}
+                        />
+                    ))}
+                    {dayTasks.map(task => (
+                        <div 
+                            key={task.id}
+                            className={`w-1.5 h-1.5 rounded-full border border-gray-400 ${task.completed ? 'bg-green-400 border-transparent' : 'bg-transparent'}`}
                         />
                     ))}
                 </div>
 
-                {dayEvents.length > 3 && (
-                    <div className="hidden md:block text-[9px] text-center text-gray-400">+ {dayEvents.length - 3}</div>
+                {totalItems > maxVisible && (
+                    <div className="hidden md:block text-[9px] text-center text-gray-400 font-medium">
+                        + {totalItems - maxVisible} itens
+                    </div>
                 )}
               </div>
             </div>

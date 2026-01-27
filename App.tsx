@@ -17,7 +17,7 @@ import { NotificationsModal } from './components/NotificationsModal';
 import { IAConfirmationModal } from './components/IAConfirmationModal';
 import { FocusOverlay } from './components/FocusOverlay';
 import { ToastContainer } from './components/Toast';
-import { ViewMode, CalendarEvent } from './types';
+import { ViewMode, CalendarEvent, Task } from './types';
 import { Menu, Plus, Sparkles, Loader2 } from 'lucide-react';
 
 // Wrapper component to use the context
@@ -62,6 +62,11 @@ const AppContent = () => {
     setEventModalOpen(true);
   };
 
+  const handleTaskClickFromCalendar = (task: Task) => {
+      // Toggle task completion directly from calendar
+      updateTask({ ...task, completed: !task.completed });
+  };
+
   const handleOpenSettings = () => {
     setSettingsOpen(true);
   };
@@ -94,8 +99,10 @@ const AppContent = () => {
       case 'month':
         return <CalendarGrid 
                   events={events} 
+                  tasks={tasks}
                   onDateClick={handleDateClick} 
                   onEventClick={handleEventClick} 
+                  onTaskClick={handleTaskClickFromCalendar}
                />;
       case 'tasks':
         return <TaskView 
