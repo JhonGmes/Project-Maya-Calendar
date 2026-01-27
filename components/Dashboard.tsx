@@ -3,10 +3,11 @@ import React, { useState } from 'react';
 import { CalendarEvent, Task } from '../types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Clock, CheckCircle2, Circle, AlertCircle, Plus, Sparkles, Trophy, Target, WifiOff, CloudCheck, Flame, Zap, Brain, ArrowRight } from 'lucide-react';
+import { Clock, CheckCircle2, Circle, AlertCircle, Plus, Sparkles, Trophy, Target, WifiOff, CloudCheck, Flame, Zap, Brain, ArrowRight, Briefcase, Activity, AlertTriangle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getScoreLevel } from '../utils/productivityScore';
 import { ProductivityChart } from './ProductivityChart';
+import { calculateWorkflowMetrics } from '../utils/workflowMetrics';
+import { detectBurnout } from '../utils/burnoutDetector';
 
 interface DashboardProps {
   events: CalendarEvent[];
@@ -18,9 +19,13 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClick, onAddTask, onToggleTask }) => {
-  const { productivityScore, scoreBreakdown, scoreHistory, systemDecision, setMayaOpen, isSupabaseConnected, isAuthenticated, executeIAAction } = useApp();
+  const { productivityScore, scoreBreakdown, scoreHistory, systemDecision, setMayaOpen, isSupabaseConnected, isAuthenticated, executeIAAction, currentTeam, userRole, iaHistory } = useApp();
   const [showScoreDetails, setShowScoreDetails] = useState(false);
 
+  // Executive View Conditions
+  const showExecutiveView = currentTeam && (userRole === 'manager' || userRole === 'admin');
+
+  // Filter Data
   const today = new Date();
   const todayEvents = events.filter(e => 
     new Date(e.start).toDateString() === today.toDateString()
@@ -28,13 +33,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
 
   const pendingTasks = tasks.filter(t => !t.completed).slice(0, 5);
   
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Bom dia';
-    if (hour < 18) return 'Boa tarde';
-    return 'Boa noite';
-  };
-
+  // Handlers
   const handleFocusSuggestion = () => {
       if (systemDecision.type === 'SUGGEST_FOCUS') {
           executeIAAction({
@@ -55,6 +54,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
           }, "ai");
       }
   };
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Bom dia';
+    if (hour < 18) return 'Boa tarde';
+    return 'Boa noite';
+  };
+
+  // --- Executive Logic ---
+  const workflows = tasks.filter(t => t.workflow);
+  const burnoutAnalysis = detectBurnout(tasks, iaHistory, productivityScore);
 
   return (
     <div className="h-full overflow-y-auto p-6 md:p-10 scrollbar-hide">
@@ -86,15 +96,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
       <header className="mb-8 flex justify-between items-end relative">
         <div>
             <h2 className="text-4xl font-serif font-bold text-custom-soil dark:text-white mb-2 animate-slide-up">
-            {getGreeting()}, <span className="opacity-60">Usuário</span>
+            {getGreeting()}, <span className="opacity-60">{currentTeam ? `Gestor` : 'Usuário'}</span>
             </h2>
             <div className="flex items-center gap-2 animate-slide-up" style={{animationDelay: '0.1s'}}>
                 <p className="text-gray-500 dark:text-gray-400">
                 {format(today, "EEEE, d 'de' MMMM", { locale: ptBR })}
                 </p>
-                {isSupabaseConnected && (
-                    <span className="px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-[10px] font-bold flex items-center gap-1">
-                        <CloudCheck size={10} /> Online
+                {currentTeam && (
+                    <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 text-[10px] font-bold flex items-center gap-1 uppercase tracking-wide">
+                        <Briefcase size={10} /> {currentTeam.name}
                     </span>
                 )}
             </div>
@@ -149,6 +159,54 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
             )}
         </div>
       </header>
+
+      {/* --- EXECUTIVE DASHBOARD SECTION (Only for Managers/Admins in Team Mode) --- */}
+      {showExecutiveView && (
+          <div className="mb-10 animate-slide-up">
+              <div className="flex items-center gap-2 mb-4">
+                  <Activity className="text-purple-600" size={20} />
+                  <h3 className="text-xl font-bold dark:text-white">Visão Geral da Equipe</h3>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                  {/* Workflow Summary */}
+                  {workflows.slice(0, 3).map(wf => {
+                      const m = calculateWorkflowMetrics(wf.workflow!);
+                      return (
+                          <div key={wf.id} className="p-4 rounded-2xl bg-white dark:bg-white/5 border border-gray-100 dark:border-white/5 shadow-sm">
+                              <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200 mb-2 truncate">{wf.title}</h4>
+                              <div className="flex justify-between items-end">
+                                  <div className="text-xs text-gray-500">
+                                      <span className="font-mono text-lg font-bold text-purple-600 dark:text-purple-400">{m.completedSteps}</span>/{m.totalSteps}
+                                  </div>
+                                  <div className="w-12 h-12 relative">
+                                      <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
+                                          <path className="text-gray-200 dark:text-white/10" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
+                                          <path className="text-purple-500" strokeDasharray={`${m.completionRate}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
+                                      </svg>
+                                  </div>
+                              </div>
+                          </div>
+                      )
+                  })}
+                  
+                  {/* Burnout Alert Card */}
+                  {burnoutAnalysis.level !== 'low' && (
+                      <div className="p-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 flex flex-col justify-between">
+                          <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-bold text-sm">
+                              <AlertTriangle size={16} /> Risco Operacional
+                          </div>
+                          <p className="text-xs text-red-700 dark:text-red-300 mt-2 font-medium">
+                              {burnoutAnalysis.reason}
+                          </p>
+                          <div className="mt-2 text-[10px] uppercase tracking-wider text-red-500 font-bold bg-white/50 dark:bg-black/20 px-2 py-1 rounded w-fit">
+                              Nível {burnoutAnalysis.level === 'high' ? 'Crítico' : 'Moderado'}
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
 
       {/* SMART FOCUS CARD (Controlled by Engine) */}
       {systemDecision.type === 'SUGGEST_FOCUS' && (

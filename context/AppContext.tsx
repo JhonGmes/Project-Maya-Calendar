@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction, IAHistoryItem, FocusSession, UserRole, ScoreBreakdown, SystemDecision, ProductivityScore, WorkflowTemplate, Workflow, WorkflowLog, IAActionHistory } from "../types";
+import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction, IAHistoryItem, FocusSession, UserRole, ScoreBreakdown, SystemDecision, ProductivityScore, WorkflowTemplate, Workflow, WorkflowLog, IAActionHistory, UserUsage } from "../types";
 import { StorageService } from "../services/storage";
 import { supabase } from "../services/supabaseClient";
 import { calculatePriority, sortTasksByDeadline } from "../utils/taskUtils";
@@ -8,7 +8,7 @@ import { ToastMessage } from "../components/Toast";
 import { calculateProductivityScore, calculateScoreBreakdown } from "../utils/productivityScore";
 import { getDailyFocus } from "../utils/dailyFocus";
 import { detectPersonality } from "../utils/personalityEngine"; 
-import { generateWeeklyReport } from "../utils/weeklyReport"; 
+import { generateWeeklyReportData, generateWeeklyReport } from "../utils/weeklyReport"; 
 import { useAuth } from "./AuthContext";
 import { getNextTaskSuggestion } from "../utils/taskAnalyzer";
 import { generateReorganizationPlan } from "../utils/weekReorganizer"; 
@@ -16,6 +16,9 @@ import { IAActionEngine } from "../utils/decisionEngine";
 import { generateDailySummary } from "../utils/dailySummary";
 import { isToday, getHours } from "date-fns";
 import { WorkflowEngine } from "../utils/workflowEngine";
+import { detectBurnout } from "../utils/burnoutDetector";
+import { Permissions } from "../utils/permissions";
+import { checkAILimit, checkWorkflowLimit, PLAN_CONFIG } from "../utils/plans";
 
 type Screen = ViewMode | "login" | "settings";
 
@@ -54,12 +57,14 @@ export interface AppContextData {
   // Profile
   profile: UserProfile | null;
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
+  aiUsage: UserUsage | null; // New
 
-  // Teams
+  // Teams & Permissions
   teams: Team[];
   currentTeam: Team | null;
   userRole: UserRole;
   switchTeam: (teamId: string | null) => Promise<void>;
+  canEditWorkflow: boolean;
 
   // AI State
   iaStatus: IAStatus;
@@ -116,10 +121,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowLogs, setWorkflowLogs] = useState<WorkflowLog[]>([]);
+  const [aiUsage, setAiUsage] = useState<UserUsage | null>(null);
   
   // Score State
   const [productivityScore, setProductivityScore] = useState(0);
-  const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown>({ focusPoints: 0, taskPoints: 0, consistencyBonus: 0, penalties: 0, total: 0, streakDays: 0 });
+  const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown>({ focusPoints: 0, taskPoints: 0, consistencyBonus: 0, penalties: 0, total: 0, streakDays: 0, iaBonus: 0, completedTasksCount: 0, focusSessionsCount: 0, iaAcceptanceRate: 0 });
   const [scoreHistory, setScoreHistory] = useState<ScoreHistory[]>([]);
   
   const [dailyFocus, setDailyFocus] = useState<Task | null>(null);
@@ -166,6 +172,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setNotifications(loadedNotifs);
         setTemplates(loadedTemplates);
         setWorkflowLogs(loadedLogs);
+        
+        const usage = StorageService.getUsage();
+        // Reset daily usage if needed
+        const today = new Date().toISOString().split('T')[0];
+        if (usage.lastUsageReset.split('T')[0] !== today) {
+            usage.aiSuggestionsToday = 0;
+            usage.lastUsageReset = new Date().toISOString();
+            StorageService.saveUsage(usage);
+        }
+        setAiUsage(usage);
         
         const personalTasks = loadedTasks.filter(t => !t.teamId);
         setTasks(sortTasksByDeadline(personalTasks));
@@ -227,6 +243,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       setSystemDecision(decision);
 
+      // Check for Burnout (New Logic)
+      const burnoutAnalysis = detectBurnout(tasks, iaHistory, productivityScore);
+      if (burnoutAnalysis.level === 'high' && !agentSuggestion) {
+          setAgentSuggestion({
+              id: 'burnout-risk',
+              type: 'warning',
+              message: `⚠️ Risco de sobrecarga: ${burnoutAnalysis.reason}. Posso redistribuir suas tarefas?`,
+              actionLabel: 'Reorganizar',
+              actionData: {
+                  type: "REORGANIZE_WEEK",
+                  payload: { changes: [], reason: "Prevenção de Burnout" } // Payload filled by engine logic later
+              }
+          });
+      }
+
       if (decision.type === 'SUGGEST_NEXT_STEP') {
           const recentSuggestion = iaHistory.slice(-5).find(h => 
               h.action.type === 'NO_ACTION' && 
@@ -251,7 +282,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
       }
 
-  }, [tasks, iaHistory, focusSession, scoreBreakdown]);
+  }, [tasks, iaHistory, focusSession, scoreBreakdown, productivityScore]);
 
   // Switch Team Logic
   const switchTeam = async (teamId: string | null) => {
@@ -330,6 +361,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const addWorkflow = async (title: string, steps: string[]) => {
     if (!user && !isLocalMode) return;
+    
+    // Check Permissions (Phase 12)
+    if (currentTeam && !Permissions.canEditWorkflow(userRole)) {
+        addToast({ id: Date.now().toString(), title: "Permissão Negada", message: "Apenas gerentes podem criar fluxos.", type: "error" });
+        return;
+    }
+
+    // Check Plan Limit (Phase O)
+    if (profile && aiUsage) {
+        if (!checkWorkflowLimit(profile.plan, aiUsage.workflowsCount)) {
+            addToast({ id: Date.now().toString(), title: "Limite do Plano", message: `Upgrade necessário para criar mais fluxos.`, type: "error" });
+            return;
+        }
+        // Increment workflow count
+        const newUsage = { ...aiUsage, workflowsCount: aiUsage.workflowsCount + 1 };
+        StorageService.saveUsage(newUsage);
+        setAiUsage(newUsage);
+    }
+
     const stepsData = steps.map(s => ({ title: s }));
     const workflow = WorkflowEngine.createTemplate(title, stepsData);
     workflow.ownerId = user?.id; // Assign owner
@@ -383,6 +433,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const saveWorkflowAsTemplate = async (workflow: Workflow) => {
+     if (currentTeam && !Permissions.canEditWorkflow(userRole)) {
+        addToast({ id: Date.now().toString(), title: "Permissão Negada", message: "Apenas gerentes podem salvar templates.", type: "error" });
+        return;
+     }
      const template: WorkflowTemplate = {
          id: StorageService.generateId(),
          title: workflow.title,
@@ -429,9 +483,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const generateReport = () => {
-      const report = generateWeeklyReport(tasks, scoreHistory, iaHistory);
+      // Manual trigger uses default text generation
+      const reportText = generateWeeklyReport(tasks, scoreHistory, iaHistory);
       StorageService.saveNotification("Relatório Semanal Disponível");
-      addMessage({ id: Date.now().toString(), sender: 'maya', text: report });
+      addMessage({ id: Date.now().toString(), sender: 'maya', text: reportText });
       setMayaOpen(true);
   };
   
@@ -509,6 +564,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const executeIAAction = async (action: IAAction, source: "user" | "ai" = "ai") => {
+    
+    // Plan Limit Check for AI Suggestions
+    if (source === 'ai' && profile && aiUsage) {
+        // We consider every AI execution a "suggestion usage" if it came from the AI
+        const limitCheck = checkAILimit(profile.plan, aiUsage);
+        if (!limitCheck.allowed) {
+            addMessage({ 
+                id: Date.now().toString(), 
+                sender: 'maya', 
+                text: `🔒 Limite diário de sugestões atingido no plano ${profile.plan}. Atualize para continuar recebendo ajuda da IA hoje.` 
+            });
+            return;
+        }
+        // Increment usage
+        const newUsage = { ...aiUsage, aiSuggestionsToday: aiUsage.aiSuggestionsToday + 1 };
+        StorageService.saveUsage(newUsage);
+        setAiUsage(newUsage);
+    }
+
     if (action.type !== 'NEGOTIATE_DEADLINE' && action.type !== 'ASK_CONFIRMATION' && action.type !== 'SHOW_SUMMARY') {
         setIaHistory(prev => [
             ...prev, 
@@ -572,10 +646,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                      const taskWithHistory = {
                          ...targetTask, 
                          workflow: {
-                             ...updatedWf,
-                             // Re-calculate completion based on steps if needed, 
-                             // but 'advanceWorkflow' already handles status transition.
-                             // We just need to persist the history.
+                             ...updatedWf
                          }
                      };
                      await updateTask(taskWithHistory);
@@ -603,7 +674,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              addMessage({ 
                  id: Date.now().toString(), 
                  sender: 'maya', 
-                 text: `📊 **Resumo do Dia**\nScore: ${action.payload.score}\n\n${action.payload.message}`
+                 text: `📊 **Resumo do Dia**\nScore: ${action.payload.score}\n\n${action.payload.message}\n\n*${action.payload.suggestionForTomorrow}*`
              });
              setMayaOpen(true);
              break;
@@ -614,6 +685,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                  question: `Posso criar o fluxo de trabalho "${action.payload.title}" com ${action.payload.steps.length} etapas?\n\nEtapas:\n${action.payload.steps.map((s, i) => `${i+1}. ${s}`).join('\n')}`
              });
              break;
+        case "SEND_REPORT":
+             // Simulate Email Sending via Notification/Toast
+             StorageService.saveNotification(`Relatório Semanal enviado para ${profile?.email}`);
+             addToast({ id: Date.now().toString(), title: "Relatório Enviado", message: "Verifique seu email.", type: "success" });
+             break;
         case "REPLY":
              addMessage({ id: Date.now().toString(), sender: 'maya', text: action.payload.message });
              break;
@@ -621,21 +697,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Handle PROPOSE_WORKFLOW confirmation inside the "execute" flow if user says Yes
-  // But wait, executeIAAction is called AFTER confirmation in MayaModal for pending actions.
-  // So we need to handle the actual creation inside executeIAAction for PROPOSE_WORKFLOW type.
-  // Let's patch executeIAAction above to handle the creation.
-  
-  // Correction: The PROPOSE_WORKFLOW case in switch above sets pendingAction. 
-  // When user clicks "Confirm", executeIAAction is called AGAIN with source="ai" (or "user" depending on call).
-  // We need a case to actually CREATE it.
-  
   const executeIAActionExpanded = async (action: IAAction, source: "user" | "ai" = "ai") => {
       // Intercept creation
       if (action.type === 'PROPOSE_WORKFLOW') {
           // If we are here, it means confirmed
           await addWorkflow(action.payload.title, action.payload.steps);
-          addToast({ id: Date.now().toString(), title: "Fluxo Criado", message: "Processo iniciado com sucesso.", type: "success" });
+          // Toast handled inside addWorkflow
           return;
       }
       
@@ -651,7 +718,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isMobileMenuOpen, setMobileMenuOpen,
         isNotificationsOpen, setNotificationsOpen,
         toasts, addToast,
-        profile, updateProfile,
+        profile, updateProfile, aiUsage,
         tasks, addTask, updateTask,
         addWorkflow,
         saveWorkflowAsTemplate,
@@ -672,6 +739,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         markNotificationAsRead,
         clearAllNotifications,
         teams, currentTeam, switchTeam, userRole, 
+        canEditWorkflow: Permissions.canEditWorkflow(userRole), // Permission exposure
         personality,
         generateReport,
         isSupabaseConnected,

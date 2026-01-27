@@ -1,5 +1,5 @@
 
-import { CalendarEvent, Task, UserProfile, IAMessage, Notification, ScoreHistory, Team, QuarterlyGoal, FocusSession, WorkflowTemplate, WorkflowLog } from '../types';
+import { CalendarEvent, Task, UserProfile, IAMessage, Notification, ScoreHistory, Team, QuarterlyGoal, FocusSession, WorkflowTemplate, WorkflowLog, UserUsage } from '../types';
 import { supabase } from './supabaseClient';
 
 const LOCAL_STORAGE_KEYS = {
@@ -14,7 +14,8 @@ const LOCAL_STORAGE_KEYS = {
   GOALS: 'maya_quarter_goals',
   FOCUS_SESSION: 'maya_focus_session',
   WORKFLOW_TEMPLATES: 'maya_workflow_templates',
-  WORKFLOW_LOGS: 'maya_workflow_logs' // New
+  WORKFLOW_LOGS: 'maya_workflow_logs',
+  AI_USAGE: 'maya_ai_usage' // New
 };
 
 const defaultProfile: UserProfile = {
@@ -25,6 +26,7 @@ const defaultProfile: UserProfile = {
   workingHours: { start: '09:00', end: '18:00' },
   notifications: true,
   defaultReminder: 15,
+  plan: 'FREE' // Default plan
 };
 
 const generateId = () => {
@@ -283,7 +285,8 @@ export const StorageService = {
            if (data) return {
                id: data.id, name: data.name || user.email?.split('@')[0], email: data.email || user.email,
                avatarUrl: data.avatar_url, phone: data.phone, role: data.role, bio: data.bio,
-               theme: data.theme, workingHours: data.working_hours, notifications: data.notifications, defaultReminder: 15
+               theme: data.theme, workingHours: data.working_hours, notifications: data.notifications, 
+               defaultReminder: 15, plan: data.plan || 'FREE'
              };
          }
        } catch (err) { console.warn("Supabase profile error", err); }
@@ -299,7 +302,8 @@ export const StorageService = {
         if (user) {
             const payload = {
             name: profile.name, theme: profile.theme, working_hours: profile.workingHours,
-            notifications: profile.notifications, avatar_url: profile.avatarUrl, phone: profile.phone, role: profile.role, bio: profile.bio
+            notifications: profile.notifications, avatar_url: profile.avatarUrl, phone: profile.phone, 
+            role: profile.role, bio: profile.bio, plan: profile.plan
             };
             const { data, error } = await supabase.from('profiles').update(payload).eq('id', user.id).select();
             if (!error && data) return { ...profile, ...data[0] } as UserProfile;
@@ -454,6 +458,16 @@ export const StorageService = {
 
   saveFocusSession: (session: FocusSession) => {
       localStorage.setItem(LOCAL_STORAGE_KEYS.FOCUS_SESSION, JSON.stringify(session));
+  },
+
+  // Usage Tracking
+  getUsage: (): UserUsage => {
+      const data = localStorage.getItem(LOCAL_STORAGE_KEYS.AI_USAGE);
+      return data ? JSON.parse(data) : { workflowsCount: 0, aiSuggestionsToday: 0, lastUsageReset: new Date().toISOString() };
+  },
+
+  saveUsage: (usage: UserUsage) => {
+      localStorage.setItem(LOCAL_STORAGE_KEYS.AI_USAGE, JSON.stringify(usage));
   },
   
   generateId

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video, Maximize2, Minimize2 } from 'lucide-react';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video, Maximize2, Minimize2, Info } from 'lucide-react';
 import { generateImage, generateSpeech, chatWithMaya, editImage, analyzeVideo } from '../services/geminiService';
 import { parseIAResponse } from '../utils/iaActionEngine';
 import { adaptTone } from '../utils/personalityEngine';
@@ -23,7 +23,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<{data: string, mimeType: string} | null>(null);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
-  const [isMaximized, setIsMaximized] = useState(false); // New Fullscreen State
+  const [isMaximized, setIsMaximized] = useState(false); 
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputVideoRef = useRef<HTMLInputElement>(null);
@@ -34,7 +34,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, pendingAction, isMaximized]);
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -72,24 +71,20 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
               const result = reader.result as string;
               const base64 = result.split(',')[1];
               setSelectedVideo({ data: base64, mimeType: file.type });
-              // We don't add the message immediately, waiting for user prompt
               addMessage({ id: Date.now().toString(), sender: 'user', text: 'Vídeo carregado. O que deseja saber?', type: 'video', content: result });
           };
           reader.readAsDataURL(file);
       }
   };
 
-  // --- NEW: Execute Pending Action ---
   const confirmAction = async () => {
       if (!pendingAction) return;
-      
       setIaStatus('executing');
       try {
-           // Executa a ação original armazenada no estado
            await executeIAAction(pendingAction.originalAction, "ai");
-           sendAIMessage("Feito!");
+           sendAIMessage("✔ Feito! Ação concluída com sucesso.");
       } catch (e) {
-          sendAIMessage("Ocorreu um erro ao executar a ação.");
+          sendAIMessage("❌ Ocorreu um erro ao executar a ação.");
       }
       setPendingAction(null);
       setIaStatus('idle');
@@ -99,10 +94,9 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       await cancelIAAction();
   };
 
-  // Phase 5: Handle Negotiation Choice
   const handleNegotiationOption = async (option: NegotiationOption) => {
       setIaStatus('executing');
-      setPendingAction(null); // Clear the negotiation modal
+      setPendingAction(null);
       try {
           await executeIAAction(option.action, "user");
           sendAIMessage(`Combinado! Opção "${option.label}" aplicada.`);
@@ -112,12 +106,8 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       setIaStatus('idle');
   };
 
-  // --- NEW: Accept Agent Suggestion ---
   const acceptSuggestion = async () => {
       if (!agentSuggestion) return;
-      
-      // Agent Suggestions are basically pre-packaged IA Actions
-      // If the suggestion type implies a confirmation, we trigger the confirmation flow
       if (agentSuggestion.type === 'warning' || agentSuggestion.type === 'pattern' || agentSuggestion.type === 'workflow_step') {
           await executeIAAction(agentSuggestion.actionData, "ai");
           setAgentSuggestion(null);
@@ -130,7 +120,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
     
     setInput('');
     if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'; // Reset height immediately
+        textareaRef.current.style.height = 'auto';
     }
 
     if (userMsg.trim()) {
@@ -140,18 +130,16 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
     setIaStatus('thinking');
 
     try {
-        // 0. Video Analysis
         if (selectedVideo) {
             const analysisPrompt = userMsg || "Descreva o que acontece neste vídeo.";
             const analysis = await analyzeVideo(selectedVideo.data, selectedVideo.mimeType, analysisPrompt);
             sendAIMessage(analysis);
-            setSelectedVideo(null); // Clear video after sending
+            setSelectedVideo(null); 
             return;
         }
 
         const lower = userMsg.toLowerCase().trim();
 
-        // 1. Image Editing
         if (selectedImage) {
              const editPrompt = userMsg || "Descreva esta imagem";
              const editedImage = await editImage(selectedImage, editPrompt);
@@ -164,7 +152,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
              return;
         }
 
-        // 2. Image Generation
         if (lower.startsWith('gerar imagem') || lower.startsWith('crie uma imagem')) {
             const prompt = userMsg.replace(/gerar imagem|crie uma imagem/i, '').trim();
             const imageUrl = await generateImage(prompt, "1K");
@@ -176,7 +163,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             return;
         } 
 
-        // 3. TTS
         if (lower.startsWith('fale') || lower.startsWith('diga')) {
              const textToSpeak = userMsg.replace(/fale|diga/i, '').trim();
              const audioData = await generateSpeech(textToSpeak);
@@ -197,10 +183,8 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
              return;
         }
 
-        // 4. MAIN CHAT FLOW (Chat -> Engine -> Context)
         const history = messages.filter(m => m.type === 'text').map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
         
-        // 4.1 Get Raw Response from LLM (Now Passing APP CONTEXT with Team Info)
         const rawResponse = await chatWithMaya(
             userMsg, 
             history, 
@@ -208,13 +192,9 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             { tasks, events, history: iaHistory, currentTeam, userRole }
         );
 
-        // 4.2 Parse response through the Engine
         const parsedResponse = parseIAResponse(rawResponse);
-
-        // 4.3 Display the text message
         sendAIMessage(parsedResponse.message);
 
-        // 4.4 Execute actions
         for (const action of parsedResponse.actions) {
             await executeIAAction(action, "ai");
         }
@@ -275,16 +255,26 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             
             {/* Agent Proactive Suggestion Banner */}
             {agentSuggestion && (
-                <div className="bg-gradient-to-r from-purple-100 to-blue-50 dark:from-purple-900/40 dark:to-blue-900/20 p-4 rounded-2xl border border-purple-200 dark:border-white/10 mb-4 animate-slide-up">
+                <div className={`p-4 rounded-2xl border mb-4 animate-slide-up ${
+                    agentSuggestion.type === 'warning' 
+                    ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30' 
+                    : 'bg-gradient-to-r from-purple-100 to-blue-50 dark:from-purple-900/40 dark:to-blue-900/20 border-purple-200 dark:border-white/10'
+                }`}>
                     <div className="flex items-start gap-3">
-                        <div className="p-2 bg-white dark:bg-white/10 rounded-full text-purple-600 dark:text-purple-300">
+                        <div className={`p-2 rounded-full ${
+                            agentSuggestion.type === 'warning' ? 'bg-red-100 text-red-600' : 'bg-white dark:bg-white/10 text-purple-600 dark:text-purple-300'
+                        }`}>
                              {agentSuggestion.type === 'warning' ? <AlertTriangle size={18} /> : <Brain size={18} />}
                         </div>
                         <div className="flex-1">
-                            <p className="text-sm font-medium text-purple-900 dark:text-purple-100 mb-2">{agentSuggestion.message}</p>
+                            <p className={`text-sm font-medium mb-2 ${agentSuggestion.type === 'warning' ? 'text-red-900 dark:text-red-200' : 'text-purple-900 dark:text-purple-100'}`}>
+                                {agentSuggestion.message}
+                            </p>
                             <button 
                                 onClick={acceptSuggestion}
-                                className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded-lg font-bold transition-colors shadow-sm"
+                                className={`flex items-center gap-2 px-3 py-1.5 text-white text-xs rounded-lg font-bold transition-colors shadow-sm ${
+                                    agentSuggestion.type === 'warning' ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-600 hover:bg-purple-700'
+                                }`}
                             >
                                 {agentSuggestion.actionLabel} <ArrowRight size={12} />
                             </button>
@@ -294,61 +284,78 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                 </div>
             )}
 
-            {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`
-                        max-w-[85%] p-3 rounded-2xl text-sm
-                        ${msg.sender === 'user' 
-                            ? 'bg-custom-soil text-white rounded-br-none' 
-                            : 'bg-white dark:bg-zinc-800 border border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-none shadow-sm'}
-                    `}>
-                        {msg.type === 'text' && (
-                            <div className="whitespace-pre-line">{msg.text}</div>
-                        )}
-                        {msg.type === 'image' && msg.content && (
-                            <div className="space-y-2">
-                                <p className="opacity-80 text-xs mb-1">{msg.text}</p>
-                                <img src={msg.content} alt="Generated" className="rounded-lg w-full h-auto border border-white/10" />
-                                {msg.sender === 'user' && selectedImage === msg.content && (
-                                     <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Imagem selecionada para edição</div>
-                                )}
-                                {msg.sender === 'maya' && (
-                                     <button 
-                                        onClick={() => { setSelectedImage(msg.content!); setInput("Edite: "); }}
-                                        className="flex items-center gap-1 text-xs text-custom-caramel mt-2 hover:underline"
-                                     >
-                                        <Edit size={12} /> Editar esta imagem
-                                     </button>
-                                )}
-                            </div>
-                        )}
-                        {msg.type === 'audio' && msg.content && (
-                            <div className="flex items-center gap-2">
-                                <Volume2 size={16} />
-                                <audio controls src={msg.content} className="h-8 w-48" />
-                            </div>
-                        )}
-                        {msg.type === 'video' && msg.content && (
-                            <div className="space-y-2">
-                                <p className="opacity-80 text-xs mb-1">{msg.text}</p>
-                                {/* Video Player with better styling for fullscreen handling */}
-                                <div className="rounded-lg overflow-hidden border border-white/10 bg-black">
-                                    <video 
-                                        controls 
-                                        src={msg.content} 
-                                        className="w-full h-auto max-h-[60vh] object-contain" 
-                                    />
-                                </div>
-                                {msg.sender === 'user' && selectedVideo?.data === msg.content.split(',')[1] && (
-                                        <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Vídeo em análise</div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            ))}
+            {messages.map((msg) => {
+                // Determine Visual Style based on content keywords (UX Polish)
+                let bubbleStyle = msg.sender === 'user' 
+                    ? 'bg-custom-soil text-white rounded-br-none' 
+                    : 'bg-white dark:bg-zinc-800 border border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-none shadow-sm';
+                
+                let icon = null;
 
-            {/* Phase 5: NEGOTIATE_DEADLINE UI */}
+                if (msg.sender === 'maya') {
+                    if (msg.text.includes("Risco") || msg.text.includes("Alerta") || msg.text.includes("Erro")) {
+                        bubbleStyle = 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 text-red-900 dark:text-red-100 rounded-bl-none';
+                        icon = <AlertTriangle size={14} className="text-red-500 mb-1" />;
+                    } else if (msg.text.includes("Sugestão") || msg.text.includes("Dica")) {
+                        bubbleStyle = 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-900/30 text-blue-900 dark:text-blue-100 rounded-bl-none';
+                        icon = <Info size={14} className="text-blue-500 mb-1" />;
+                    } else if (msg.text.includes("Feito") || msg.text.includes("Sucesso") || msg.text.includes("Concluíd")) {
+                        bubbleStyle = 'bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30 text-green-900 dark:text-green-100 rounded-bl-none';
+                        icon = <Check size={14} className="text-green-500 mb-1" />;
+                    }
+                }
+
+                return (
+                    <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${bubbleStyle}`}>
+                            {icon}
+                            {msg.type === 'text' && (
+                                <div className="whitespace-pre-line leading-relaxed">{msg.text}</div>
+                            )}
+                            {msg.type === 'image' && msg.content && (
+                                <div className="space-y-2">
+                                    <p className="opacity-80 text-xs mb-1">{msg.text}</p>
+                                    <img src={msg.content} alt="Generated" className="rounded-lg w-full h-auto border border-white/10" />
+                                    {msg.sender === 'user' && selectedImage === msg.content && (
+                                        <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Imagem selecionada para edição</div>
+                                    )}
+                                    {msg.sender === 'maya' && (
+                                        <button 
+                                            onClick={() => { setSelectedImage(msg.content!); setInput("Edite: "); }}
+                                            className="flex items-center gap-1 text-xs text-custom-caramel mt-2 hover:underline"
+                                        >
+                                            <Edit size={12} /> Editar esta imagem
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                            {msg.type === 'audio' && msg.content && (
+                                <div className="flex items-center gap-2">
+                                    <Volume2 size={16} />
+                                    <audio controls src={msg.content} className="h-8 w-48" />
+                                </div>
+                            )}
+                            {msg.type === 'video' && msg.content && (
+                                <div className="space-y-2">
+                                    <p className="opacity-80 text-xs mb-1">{msg.text}</p>
+                                    <div className="rounded-lg overflow-hidden border border-white/10 bg-black">
+                                        <video 
+                                            controls 
+                                            src={msg.content} 
+                                            className="w-full h-auto max-h-[60vh] object-contain" 
+                                        />
+                                    </div>
+                                    {msg.sender === 'user' && selectedVideo?.data === msg.content.split(',')[1] && (
+                                            <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Vídeo em análise</div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+
+            {/* Negotiation UI */}
             {pendingAction && pendingAction.originalAction.type === 'NEGOTIATE_DEADLINE' && (
                 <div className="flex justify-start animate-slide-up w-full">
                     <div className="bg-white dark:bg-zinc-800 p-5 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-orange-500 w-full">
@@ -391,7 +398,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                 </div>
             )}
 
-            {/* Standard Confirmation UI (Only if NOT negotiation) */}
+            {/* Standard Confirmation UI */}
             {pendingAction && pendingAction.originalAction.type !== 'NEGOTIATE_DEADLINE' && (
                 <div className="flex justify-start animate-slide-up">
                     <div className="bg-white dark:bg-zinc-800 p-4 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-custom-caramel">

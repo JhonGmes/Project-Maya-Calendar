@@ -59,7 +59,7 @@ export interface Workflow {
   totalSteps: number;
   completedSteps: number;
   ownerId?: string; 
-  iaHistory?: IAActionHistory[]; // New: Track AI suggestions/confirmations
+  iaHistory?: IAActionHistory[]; 
 }
 
 export interface WorkflowTemplate {
@@ -72,19 +72,17 @@ export interface WorkflowTemplate {
     }[];
 }
 
-// New: Workflow Audit Log
 export interface WorkflowLog {
   id: string;
   workflowId: string;
   stepId: string;
-  userId: string; // Quem executou
-  taskId: string; // Vinculo com a tarefa pai
+  userId: string; 
+  taskId: string; 
   action: 'started' | 'completed';
   timestamp: string;
   metadata?: any;
 }
 
-// NEW: Metrics
 export type WorkflowMetrics = {
   totalSteps: number;
   completedSteps: number;
@@ -110,8 +108,22 @@ export interface Task {
   workflow?: Workflow; 
 }
 
-// Phase 7: Roles
 export type UserRole = 'admin' | 'manager' | 'member';
+
+// --- SAAS & PLANS ---
+export type PlanType = 'FREE' | 'PRO' | 'BUSINESS';
+
+export interface PlanLimits {
+    maxWorkflows: number;
+    aiSuggestionsPerDay: number;
+    canViewTeamAnalytics: boolean;
+}
+
+export interface UserUsage {
+    workflowsCount: number;
+    aiSuggestionsToday: number;
+    lastUsageReset: string; // ISO Date
+}
 
 export interface UserProfile {
   id: string;
@@ -128,6 +140,7 @@ export interface UserProfile {
   theme: 'light' | 'dark';
   notifications: boolean;
   defaultReminder: number;
+  plan: PlanType; // New
 }
 
 export interface Company {
@@ -189,15 +202,27 @@ export interface WeeklyStats {
   burnoutLevel: "low" | "medium" | "high";
 }
 
-// --- SCORE SYSTEM 2.0 ---
+// --- REPORTING ---
+export interface WeeklyReportData {
+  week: string;
+  totalCompletedSteps: number;
+  productivityScore: number;
+  burnoutAlerts: number;
+  summary: string;
+}
+
+// --- SCORE SYSTEM ---
 export interface ScoreBreakdown {
   focusPoints: number;      
   taskPoints: number;       
   consistencyBonus: number; 
+  iaBonus: number;          
   penalties: number;        
   total: number;
   streakDays: number;
-  workflowPoints?: number; // New for Workflow Score
+  completedTasksCount: number;
+  focusSessionsCount: number;
+  iaAcceptanceRate: number; 
 }
 
 export interface ProductivityScore {
@@ -231,6 +256,7 @@ export type SystemDecision =
   | { type: 'SHOW_DAILY_SUMMARY'; payload: DailySummary }
   | { type: 'EXPLAIN_SCORE' }
   | { type: 'SUGGEST_NEXT_STEP'; payload: { workflowId: string; workflowTitle: string; step: WorkflowStep } }
+  | { type: 'BURNOUT_ALERT'; payload: { riskLevel: 'medium' | 'high'; message: string } } 
   | { type: 'NONE' };
 
 export interface IAContext {
@@ -240,6 +266,7 @@ export interface IAContext {
   nextTask?: Task;
   dailySummary?: DailySummary | null;
   scoreBreakdown: ScoreBreakdown;
+  planUsage?: { plan: PlanType, used: number, limit: number }; // Injected for AI
 }
 
 export interface TaskChange {
@@ -255,7 +282,6 @@ export interface NegotiationOption {
     style?: 'primary' | 'secondary' | 'outline';
 }
 
-// Updated IAAction to include Workflow Automation
 export type IAAction =
   | {
       type: "CREATE_TASK";
@@ -328,7 +354,7 @@ export type IAAction =
       payload: DailySummary;
     }
   | {
-      type: "COMPLETE_STEP"; // New: Automate Workflow Step
+      type: "COMPLETE_STEP";
       payload: {
           taskId: string;
           stepId: string;
@@ -336,13 +362,17 @@ export type IAAction =
       };
     }
   | {
-      type: "PROPOSE_WORKFLOW"; // New: AI Proposes a Workflow Structure
+      type: "PROPOSE_WORKFLOW"; 
       payload: {
           title: string;
           steps: string[];
           description?: string;
       };
     }
+  | {
+      type: "SEND_REPORT"; // New: Report Action
+      payload: WeeklyReportData;
+  }
   | {
       type: "REPLY";
       payload: {
@@ -372,6 +402,8 @@ export interface IAHistoryItem {
 export interface BurnoutAnalysis {
     level: "high" | "medium" | "low";
     signals: string[];
+    workloadScore: number;
+    reason?: string;
 }
 
 export interface Notification {

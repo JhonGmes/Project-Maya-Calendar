@@ -1,42 +1,61 @@
 
-import { Task, ScoreHistory, IAHistoryItem } from '../types';
+import { Task, ScoreHistory, IAHistoryItem, WeeklyReportData } from '../types';
 import { detectBurnout } from './burnoutDetector';
 import { calculateScore } from './productivityScore';
 
+// Helper to generate the text version (kept for compatibility)
 export function generateWeeklyReport(
     tasks: Task[], 
     scoreHistory: ScoreHistory[], 
     iaHistory: IAHistoryItem[] = []
 ): string {
-  
-  const completed = tasks.filter(t => t.completed).length;
-  const pending = tasks.filter(t => !t.completed).length;
-  
-  const currentScore = calculateScore(tasks, iaHistory);
-  const burnout = detectBurnout(tasks, iaHistory, currentScore);
-
-  let suggestions = "";
-  if (burnout.level === 'high') {
-      suggestions = "⚠️ **Risco de Burnout Detectado**: Sua carga está muito alta e os adiamentos frequentes indicam sobrecarga. Sugiro tirar a manhã de folga ou usar a função de reorganizar semana.";
-  } else if (currentScore > 80) {
-      suggestions = "🏆 **Excelente Desempenho**: Você está " + (completed > pending ? "dominando suas tarefas." : "muito consistente.") + " Continue assim!";
-  } else {
-      suggestions = "💡 **Dica**: Tente concluir as tarefas mais difíceis pela manhã para aumentar seu score.";
-  }
-
-  return `
+    const report = generateWeeklyReportData(tasks, scoreHistory, iaHistory);
+    return `
 📊 **Relatório Semanal Maya**
 
-**Produtividade:**
-🏆 Score Atual: ${currentScore} / 100
-✅ Tarefas Concluídas: ${completed}
-⏳ Pendências Ativas: ${pending}
+**Resumo:**
+${report.summary}
 
-**Saúde & Ritmo:**
-${burnout.level === 'high' ? '🔴 Nível de Carga: Crítico' : burnout.level === 'medium' ? '🟡 Nível de Carga: Moderado' : '🟢 Nível de Carga: Saudável'}
-${burnout.signals.length > 0 ? `*Sinais: ${burnout.signals.join(', ')}*` : ''}
-
-**Análise da IA:**
-${suggestions}
+**Métricas:**
+🏆 Score: ${report.productivityScore}
+✅ Etapas Concluídas: ${report.totalCompletedSteps}
+${report.burnoutAlerts > 0 ? `🔴 Alertas de Burnout: ${report.burnoutAlerts}` : '🟢 Saúde Operacional: OK'}
 `;
+}
+
+// New Structured Data Generator
+export function generateWeeklyReportData(
+    tasks: Task[], 
+    scoreHistory: ScoreHistory[], 
+    iaHistory: IAHistoryItem[] = []
+): WeeklyReportData {
+  
+  const completed = tasks.filter(t => t.completed).length;
+  // Calculate completed workflow steps specifically
+  const completedSteps = tasks.reduce((acc, t) => {
+      return acc + (t.workflow ? t.workflow.steps.filter(s => s.status === 'completed').length : (t.completed ? 1 : 0));
+  }, 0);
+
+  const currentScore = calculateScore(tasks, iaHistory);
+  const burnout = detectBurnout(tasks, iaHistory, currentScore);
+  const burnoutAlerts = burnout.level === 'high' ? 1 : 0;
+
+  let summary = "";
+  if (burnout.level === 'high') {
+      summary = "Carga crítica detectada. A produtividade está alta, mas o risco de exaustão é iminente. Recomendada redistribuição imediata.";
+  } else if (currentScore > 80) {
+      summary = "Semana de alta performance. O time/usuário manteve consistência e foco. Excelente adesão às sugestões da IA.";
+  } else if (currentScore > 50) {
+      summary = "Semana estável. Algumas tarefas foram adiadas, mas o ritmo geral é sustentável.";
+  } else {
+      summary = "Semana desafiadora. Baixa taxa de conclusão e foco disperso. Sugiro revisão do planejamento para a próxima semana.";
+  }
+
+  return {
+      week: new Date().toISOString(),
+      totalCompletedSteps: completedSteps,
+      productivityScore: currentScore,
+      burnoutAlerts,
+      summary
+  };
 }
