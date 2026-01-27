@@ -149,6 +149,26 @@ export const chatWithMaya = async (
   }
 }
 
+// Video Understanding
+export const analyzeVideo = async (base64Video: string, mimeType: string, prompt: string): Promise<string> => {
+    try {
+        const ai = getAI();
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: mimeType, data: base64Video } },
+                    { text: prompt }
+                ]
+            }
+        });
+        return response.text || "Não consegui analisar o vídeo.";
+    } catch (error: any) {
+        console.error("Video Analysis Error:", error);
+        return "Erro ao processar o vídeo. Verifique se o arquivo não é muito grande (recomendado < 20MB para upload direto).";
+    }
+}
+
 // Mantendo funções auxiliares de imagem/audio para compatibilidade
 export const generateImage = async (prompt: string, size: "1K" | "2K" | "4K" = "1K"): Promise<string | null> => {
     try {

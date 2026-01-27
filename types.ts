@@ -138,7 +138,7 @@ export interface IAMessage {
   id: string;
   sender: "user" | "maya";
   text: string;
-  type?: 'text' | 'image' | 'audio';
+  type?: 'text' | 'image' | 'audio' | 'video';
   content?: string;
 }
 

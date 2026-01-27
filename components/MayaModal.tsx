@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake } from 'lucide-react';
-import { generateImage, generateSpeech, chatWithMaya, editImage } from '../services/geminiService';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video } from 'lucide-react';
+import { generateImage, generateSpeech, chatWithMaya, editImage, analyzeVideo } from '../services/geminiService';
 import { parseIAResponse } from '../utils/iaActionEngine';
 import { adaptTone } from '../utils/personalityEngine';
 import { CalendarEvent, Task, NegotiationOption } from '../types';
@@ -21,8 +21,10 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
 
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<{data: string, mimeType: string} | null>(null);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputVideoRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -38,7 +40,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
     }
   }, [input]);
 
-  const sendAIMessage = (text: string, type: 'text' | 'image' | 'audio' = 'text', content?: string) => {
+  const sendAIMessage = (text: string, type: 'text' | 'image' | 'audio' | 'video' = 'text', content?: string) => {
       const adaptedText = type === 'text' ? adaptTone(text, personality) : text;
       addMessage({ id: Date.now().toString(), sender: 'maya', text: adaptedText, type, content });
   };
@@ -51,6 +53,25 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
               const base64 = reader.result as string;
               setSelectedImage(base64);
               addMessage({ id: Date.now().toString(), sender: 'user', text: 'Imagem carregada para edição', type: 'image', content: base64 });
+          };
+          reader.readAsDataURL(file);
+      }
+  };
+
+  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          if (file.size > 20 * 1024 * 1024) {
+              alert("O vídeo deve ter menos de 20MB para análise.");
+              return;
+          }
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              const result = reader.result as string;
+              const base64 = result.split(',')[1];
+              setSelectedVideo({ data: base64, mimeType: file.type });
+              // We don't add the message immediately, waiting for user prompt
+              addMessage({ id: Date.now().toString(), sender: 'user', text: 'Vídeo carregado. O que deseja saber?', type: 'video', content: result });
           };
           reader.readAsDataURL(file);
       }
@@ -103,7 +124,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   };
 
   const handleSend = async () => {
-    if (!input.trim() && !selectedImage) return;
+    if (!input.trim() && !selectedImage && !selectedVideo) return;
     const userMsg = input;
     
     setInput('');
@@ -118,6 +139,15 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
     setIaStatus('thinking');
 
     try {
+        // 0. Video Analysis
+        if (selectedVideo) {
+            const analysisPrompt = userMsg || "Descreva o que acontece neste vídeo.";
+            const analysis = await analyzeVideo(selectedVideo.data, selectedVideo.mimeType, analysisPrompt);
+            sendAIMessage(analysis);
+            setSelectedVideo(null); // Clear video after sending
+            return;
+        }
+
         const lower = userMsg.toLowerCase().trim();
 
         // 1. Image Editing
@@ -285,6 +315,15 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                                 <audio controls src={msg.content} className="h-8 w-48" />
                             </div>
                         )}
+                        {msg.type === 'video' && msg.content && (
+                            <div className="space-y-2">
+                                <p className="opacity-80 text-xs mb-1">{msg.text}</p>
+                                <video controls src={msg.content} className="rounded-lg w-full h-auto border border-white/10 max-h-60" />
+                                {msg.sender === 'user' && selectedVideo?.data === msg.content.split(',')[1] && (
+                                        <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Vídeo em análise</div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             ))}
@@ -369,7 +408,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             )}
         </div>
 
-        {/* Selected Image Preview */}
+        {/* Selected Media Preview */}
         {selectedImage && (
              <div className="px-4 py-2 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
                  <div className="flex items-center gap-2">
@@ -377,6 +416,18 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                      <span className="text-xs text-gray-500">Editando imagem... (Digite o comando)</span>
                  </div>
                  <button onClick={() => setSelectedImage(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={14} className="text-gray-400" /></button>
+             </div>
+        )}
+        
+        {selectedVideo && (
+             <div className="px-4 py-2 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
+                 <div className="flex items-center gap-2">
+                     <div className="w-10 h-10 bg-black/50 rounded flex items-center justify-center">
+                         <Video size={16} className="text-white" />
+                     </div>
+                     <span className="text-xs text-gray-500">Vídeo pronto para análise...</span>
+                 </div>
+                 <button onClick={() => setSelectedVideo(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={14} className="text-gray-400" /></button>
              </div>
         )}
 
@@ -390,6 +441,14 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                     accept="image/*"
                     onChange={handleImageUpload}
                  />
+                 <input 
+                    type="file" 
+                    ref={fileInputVideoRef}
+                    className="hidden" 
+                    accept="video/*"
+                    onChange={handleVideoUpload}
+                 />
+                 
                  <button 
                     onClick={() => fileInputRef.current?.click()}
                     className="p-3 bg-gray-100 dark:bg-white/5 text-gray-500 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
@@ -398,19 +457,27 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                      <ImageIcon size={18} />
                  </button>
                  
+                 <button 
+                    onClick={() => fileInputVideoRef.current?.click()}
+                    className="p-3 bg-gray-100 dark:bg-white/5 text-gray-500 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                    title="Carregar vídeo para análise"
+                 >
+                     <Video size={18} />
+                 </button>
+                 
                  <div className="relative flex-1">
                     <textarea 
                         ref={textareaRef}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "Digite como editar..." : "Mensagem ou comando...")}
+                        placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "Digite como editar..." : selectedVideo ? "Pergunte sobre o vídeo..." : "Mensagem ou comando...")}
                         rows={1}
                         className={`w-full bg-gray-100 dark:bg-black/50 border-none rounded-2xl py-3 pl-4 pr-12 focus:ring-2 dark:text-white transition-all resize-none overflow-hidden min-h-[48px] ${isThinkingMode ? 'focus:ring-purple-500/50 bg-purple-50/10' : 'focus:ring-custom-caramel/50'}`}
                     />
                     <button 
                         onClick={handleSend}
-                        disabled={(!input.trim() && !selectedImage) || iaStatus === 'thinking'}
+                        disabled={(!input.trim() && !selectedImage && !selectedVideo) || iaStatus === 'thinking'}
                         className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 text-white rounded-full transition-colors disabled:opacity-50 ${isThinkingMode ? 'bg-purple-600 hover:bg-purple-500' : 'bg-custom-soil hover:bg-custom-caramel'}`}
                     >
                         <Send size={16} />
