@@ -520,10 +520,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           - Histórico de Ações (IA): ${iaHistory.length} registros
           
           ESTRUTURA DO RELATÓRIO (Markdown):
-          1. 🏆 **Veredito da Semana**: Uma frase de impacto sobre o desempenho.
-          2. 📈 **Análise de Dados**: Interprete o score e a consistência.
-          3. ⚠️ **Pontos de Atenção**: Identifique gargalos ou riscos de burnout.
-          4. 🚀 **Plano para Próxima Semana**: 3 ações práticas.
+          # Relatório Semanal Maya
+          
+          ## 🏆 Veredito
+          [Uma frase de impacto sobre o desempenho]
+
+          ## 📈 Análise de Dados
+          [Interprete o score e a consistência]
+
+          ## ⚠️ Pontos de Atenção
+          [Identifique gargalos ou riscos de burnout]
+
+          ## 🚀 Plano para Próxima Semana
+          [3 ações práticas]
 
           Use um tom profissional, analítico, mas encorajador.
           Retorne no formato JSON padrão: { "message": "SEU_RELATORIO_MARKDOWN", "actions": [] }
@@ -538,7 +547,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
           const parsed = parseIAResponse(rawResponse);
           
-          addMessage({ id: Date.now().toString(), sender: 'maya', text: parsed.message });
+          // Send as specific 'report' type to trigger download button UI
+          addMessage({ 
+              id: Date.now().toString(), 
+              sender: 'maya', 
+              text: parsed.message,
+              type: 'report' 
+          });
+          
           StorageService.saveNotification("Relatório Semanal Inteligente disponível.");
 
       } catch (err) {

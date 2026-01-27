@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video, Maximize2, Minimize2, Info, List, CalendarClock } from 'lucide-react';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video, Maximize2, Minimize2, Info, List, CalendarClock, Download, FileText } from 'lucide-react';
 import { generateImage, generateSpeech, chatWithMaya, editImage, analyzeVideo } from '../services/geminiService';
 import { parseIAResponse } from '../utils/iaActionEngine';
 import { adaptTone } from '../utils/personalityEngine';
@@ -8,6 +8,8 @@ import { CalendarEvent, Task, NegotiationOption } from '../types';
 import { useApp } from '../context/AppContext';
 import { useDebounce } from '../hooks/useDebounce';
 import { format } from 'date-fns';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 interface MayaModalProps {
   isOpen: boolean;
@@ -26,6 +28,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   const [selectedVideo, setSelectedVideo] = useState<{data: string, mimeType: string} | null>(null);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false); 
+  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null); // Stores ID of msg being downloaded
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputVideoRef = useRef<HTMLInputElement>(null);
@@ -58,7 +61,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   };
   // -------------------------------------------
 
-  const sendAIMessage = (text: string, type: 'text' | 'image' | 'audio' | 'video' = 'text', content?: string) => {
+  const sendAIMessage = (text: string, type: 'text' | 'image' | 'audio' | 'video' | 'report' = 'text', content?: string) => {
       const adaptedText = type === 'text' ? adaptTone(text, personality) : text;
       addMessage({ id: Date.now().toString(), sender: 'maya', text: adaptedText, type, content });
   };
@@ -135,6 +138,29 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
           await executeIAAction(agentSuggestion.actionData, "ai");
           setAgentSuggestion(null);
       } 
+  };
+
+  const handleDownloadPDF = async (messageId: string) => {
+      const element = document.getElementById(`report-${messageId}`);
+      if (!element) return;
+
+      setDownloadingPdf(messageId);
+
+      try {
+          const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff' });
+          const imgData = canvas.toDataURL('image/png');
+          const pdf = new jsPDF('p', 'mm', 'a4');
+          const pdfWidth = pdf.internal.pageSize.getWidth();
+          const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+          
+          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+          pdf.save(`Relatorio_Maya_${format(new Date(), 'dd-MM-yyyy')}.pdf`);
+      } catch (error) {
+          console.error("PDF Error", error);
+          alert("Erro ao gerar PDF.");
+      } finally {
+          setDownloadingPdf(null);
+      }
   };
 
   const handleSend = async () => {
@@ -348,7 +374,10 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                 let icon = null;
 
                 if (msg.sender === 'maya') {
-                    if (msg.text.includes("Risco") || msg.text.includes("Alerta") || msg.text.includes("Erro")) {
+                    if (msg.type === 'report') {
+                        bubbleStyle = 'bg-white dark:bg-zinc-800 border-l-4 border-purple-500 shadow-md text-gray-800 dark:text-gray-200 rounded-lg w-full';
+                        icon = <FileText size={20} className="text-purple-500 mb-2" />;
+                    } else if (msg.text.includes("Risco") || msg.text.includes("Alerta") || msg.text.includes("Erro")) {
                         bubbleStyle = 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 text-red-900 dark:text-red-100 rounded-bl-none';
                         icon = <AlertTriangle size={14} className="text-red-500 mb-1" />;
                     } else if (msg.text.includes("Sugestão") || msg.text.includes("Dica")) {
@@ -362,10 +391,32 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
 
                 return (
                     <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${bubbleStyle}`}>
+                        <div className={`max-w-[90%] p-4 rounded-2xl text-sm ${bubbleStyle}`}>
                             {icon}
                             {msg.type === 'text' && (
                                 <div className="whitespace-pre-line leading-relaxed">{msg.text}</div>
+                            )}
+                            {msg.type === 'report' && (
+                                <div>
+                                    <div id={`report-${msg.id}`} className="bg-white dark:bg-white/5 p-4 rounded-lg mb-3">
+                                        <div className="whitespace-pre-line leading-relaxed font-medium">{msg.text}</div>
+                                        <div className="mt-4 pt-4 border-t border-dashed border-gray-200 dark:border-white/10 flex justify-between items-center text-xs text-gray-400">
+                                            <span>Maya Intelligence Report</span>
+                                            <span>{format(new Date(), 'dd/MM/yyyy')}</span>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => handleDownloadPDF(msg.id)}
+                                        disabled={downloadingPdf === msg.id}
+                                        className="w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-bold transition-colors disabled:opacity-50"
+                                    >
+                                        {downloadingPdf === msg.id ? (
+                                            <>Gerando PDF...</>
+                                        ) : (
+                                            <><Download size={16} /> Baixar Relatório (PDF)</>
+                                        )}
+                                    </button>
+                                </div>
                             )}
                             {msg.type === 'image' && msg.content && (
                                 <div className="space-y-2">
