@@ -209,6 +209,8 @@ export interface WeeklyReportData {
   productivityScore: number;
   burnoutAlerts: number;
   summary: string;
+  highlights: string[];
+  suggestions: string[];
 }
 
 // --- SCORE SYSTEM ---

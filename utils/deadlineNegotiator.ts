@@ -1,6 +1,6 @@
 
 import { Task, IAAction, NegotiationOption } from '../types';
-import { addDays, isSameDay, format, startOfDay } from 'date-fns';
+import { addDays, isSameDay, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 // Phase 5: Negotiation Logic
@@ -28,7 +28,7 @@ export function checkDeadlineViability(
     
     // Option A: Force (Keep original plan)
     const optForce: NegotiationOption = {
-        label: "Manter mesmo assim",
+        label: "Manter (Vou me esforçar)",
         style: 'outline',
         action: {
             type: "CREATE_TASK",
@@ -46,7 +46,7 @@ export function checkDeadlineViability(
     if (nextDate.getDay() === 0) nextDate.setDate(nextDate.getDate() + 1); // Sunday -> Monday
 
     const optPostpone: NegotiationOption = {
-        label: `Mover para ${format(nextDate, "EEEE (dd/MM)", { locale: ptBR })}`,
+        label: `Adiar para ${format(nextDate, "EEEE (dd/MM)", { locale: ptBR })}`,
         style: 'primary',
         action: {
             type: "CREATE_TASK",
@@ -58,9 +58,9 @@ export function checkDeadlineViability(
         }
     };
 
-    // Option C: Split/Lighten (Mocked as "Backlog" for now)
+    // Option C: Backlog
     const optBacklog: NegotiationOption = {
-        label: "Colocar no Backlog (Sem Data)",
+        label: "Colocar no Backlog (Sem data)",
         style: 'secondary',
         action: {
             type: "CREATE_TASK",
@@ -75,7 +75,7 @@ export function checkDeadlineViability(
         type: "NEGOTIATE_DEADLINE",
         payload: {
             taskTitle: newTaskTitle,
-            reason: `Você já tem ${dayTasks.length} tarefas agendadas para ${dayName} (${formattedDate}). Adicionar mais uma pode comprometer sua execução.`,
+            reason: `Você tem ${dayTasks.length} tarefas críticas para ${dayName}. Adicionar mais uma gera risco de sobrecarga. Como prefere lidar?`,
             options: [optPostpone, optBacklog, optForce]
         }
     };

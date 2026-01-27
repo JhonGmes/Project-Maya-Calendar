@@ -2,8 +2,74 @@
 import { Task, ScoreHistory, IAHistoryItem, WeeklyReportData } from '../types';
 import { detectBurnout } from './burnoutDetector';
 import { calculateScore } from './productivityScore';
+import { subDays } from 'date-fns';
 
-// Helper to generate the text version (kept for compatibility)
+export function generateWeeklyReportData(
+    tasks: Task[], 
+    scoreHistory: ScoreHistory[], 
+    iaHistory: IAHistoryItem[] = []
+): WeeklyReportData {
+  
+  // Basic Metrics
+  const completedSteps = tasks.reduce((acc, t) => {
+      return acc + (t.workflow ? t.workflow.steps.filter(s => s.status === 'completed').length : (t.completed ? 1 : 0));
+  }, 0);
+
+  const currentScore = calculateScore(tasks, iaHistory);
+  const burnout = detectBurnout(tasks, iaHistory, currentScore);
+  const burnoutAlerts = burnout.level === 'high' ? 1 : 0;
+
+  // Analysis for Highlights & Suggestions
+  const now = new Date();
+  const oneWeekAgo = subDays(now, 7);
+  const recentHistory = iaHistory.filter(h => new Date(h.timestamp) > oneWeekAgo);
+  
+  const conflictsResolved = recentHistory.filter(h => h.action.type === 'REORGANIZE_WEEK').length;
+  const focusMinutes = recentHistory.filter(h => h.action.type === 'END_FOCUS' && h.action.payload.completed).length * 25;
+  const avgFocus = Math.round(focusMinutes / 7); // Daily avg
+
+  const highlights: string[] = [];
+  if (conflictsResolved > 0) highlights.push(`Você reorganizou sua agenda ${conflictsResolved} vezes para otimizar o tempo.`);
+  if (focusMinutes > 120) highlights.push(`Manteve um total de ${Math.round(focusMinutes/60)} horas de foco profundo.`);
+  if (completedSteps > 5) highlights.push(`Avançou em ${completedSteps} etapas importantes de projetos.`);
+  if (currentScore > 80) highlights.push("Manteve consistência de Alta Performance (Score > 80).");
+
+  if (highlights.length === 0) highlights.push("Semana de manutenção. O foco foi em tarefas rotineiras.");
+
+  const suggestions: string[] = [];
+  if (burnout.level === 'high') {
+      suggestions.push("Prioridade máxima: Reduza a carga horária na próxima semana.");
+      suggestions.push("Tente delegar ou adiar tarefas não críticas de segunda-feira.");
+  } else if (burnout.level === 'medium') {
+      suggestions.push("Agrupe suas reuniões em blocos para evitar interrupções.");
+      suggestions.push("Evite agendar tarefas complexas após as 18h.");
+  } else {
+      suggestions.push("Continue com blocos de foco de 25-50 minutos.");
+      suggestions.push("Que tal desafiar-se com um projeto mais complexo na próxima semana?");
+  }
+
+  // Summary Text
+  let summary = "";
+  if (burnout.level === 'high') {
+      summary = `Carga crítica detectada. Seu score foi ${currentScore}, mas o custo operacional está alto. ${burnout.signals[0]}`;
+  } else if (currentScore > 80) {
+      summary = `Semana de elite! Score ${currentScore}. Você equilibrou perfeitamente execução e foco.`;
+  } else {
+      summary = `Semana com score ${currentScore}. ${highlights[0]}`;
+  }
+
+  return {
+      week: new Date().toISOString(),
+      totalCompletedSteps: completedSteps,
+      productivityScore: currentScore,
+      burnoutAlerts,
+      summary,
+      highlights,
+      suggestions
+  };
+}
+
+// Text generator wrapper for legacy compatibility
 export function generateWeeklyReport(
     tasks: Task[], 
     scoreHistory: ScoreHistory[], 
@@ -16,46 +82,15 @@ export function generateWeeklyReport(
 **Resumo:**
 ${report.summary}
 
+**Destaques:**
+${report.highlights.map(h => `• ${h}`).join('\n')}
+
+**Sugestões:**
+${report.suggestions.map(s => `👉 ${s}`).join('\n')}
+
 **Métricas:**
 🏆 Score: ${report.productivityScore}
-✅ Etapas Concluídas: ${report.totalCompletedSteps}
-${report.burnoutAlerts > 0 ? `🔴 Alertas de Burnout: ${report.burnoutAlerts}` : '🟢 Saúde Operacional: OK'}
+✅ Entregas: ${report.totalCompletedSteps}
+${report.burnoutAlerts > 0 ? `🔴 Alerta de Sobrecarga` : '🟢 Saúde Operacional: Estável'}
 `;
-}
-
-// New Structured Data Generator
-export function generateWeeklyReportData(
-    tasks: Task[], 
-    scoreHistory: ScoreHistory[], 
-    iaHistory: IAHistoryItem[] = []
-): WeeklyReportData {
-  
-  const completed = tasks.filter(t => t.completed).length;
-  // Calculate completed workflow steps specifically
-  const completedSteps = tasks.reduce((acc, t) => {
-      return acc + (t.workflow ? t.workflow.steps.filter(s => s.status === 'completed').length : (t.completed ? 1 : 0));
-  }, 0);
-
-  const currentScore = calculateScore(tasks, iaHistory);
-  const burnout = detectBurnout(tasks, iaHistory, currentScore);
-  const burnoutAlerts = burnout.level === 'high' ? 1 : 0;
-
-  let summary = "";
-  if (burnout.level === 'high') {
-      summary = "Carga crítica detectada. A produtividade está alta, mas o risco de exaustão é iminente. Recomendada redistribuição imediata.";
-  } else if (currentScore > 80) {
-      summary = "Semana de alta performance. O time/usuário manteve consistência e foco. Excelente adesão às sugestões da IA.";
-  } else if (currentScore > 50) {
-      summary = "Semana estável. Algumas tarefas foram adiadas, mas o ritmo geral é sustentável.";
-  } else {
-      summary = "Semana desafiadora. Baixa taxa de conclusão e foco disperso. Sugiro revisão do planejamento para a próxima semana.";
-  }
-
-  return {
-      week: new Date().toISOString(),
-      totalCompletedSteps: completedSteps,
-      productivityScore: currentScore,
-      burnoutAlerts,
-      summary
-  };
 }
