@@ -1,10 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight } from 'lucide-react';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake } from 'lucide-react';
 import { generateImage, generateSpeech, chatWithMaya, editImage } from '../services/geminiService';
 import { parseIAResponse } from '../utils/iaActionEngine';
 import { adaptTone } from '../utils/personalityEngine';
-import { CalendarEvent, Task } from '../types';
+import { CalendarEvent, Task, NegotiationOption } from '../types';
 import { useApp } from '../context/AppContext';
 
 interface MayaModalProps {
@@ -17,7 +17,7 @@ interface MayaModalProps {
 
 export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   const appContext = useApp();
-  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality, agentSuggestion, setAgentSuggestion, executeIAAction } = appContext;
+  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality, agentSuggestion, setAgentSuggestion, executeIAAction, tasks, events, iaHistory, currentTeam, userRole } = appContext;
 
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -77,6 +77,19 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       sendAIMessage("Ação cancelada.");
   };
 
+  // Phase 5: Handle Negotiation Choice
+  const handleNegotiationOption = async (option: NegotiationOption) => {
+      setIaStatus('executing');
+      setPendingAction(null); // Clear the negotiation modal
+      try {
+          await executeIAAction(option.action, "user");
+          sendAIMessage(`Combinado! Opção "${option.label}" aplicada.`);
+      } catch (e) {
+          sendAIMessage("Erro ao aplicar a opção.");
+      }
+      setIaStatus('idle');
+  };
+
   // --- NEW: Accept Agent Suggestion ---
   const acceptSuggestion = async () => {
       if (!agentSuggestion) return;
@@ -84,12 +97,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       // Agent Suggestions are basically pre-packaged IA Actions
       // If the suggestion type implies a confirmation, we trigger the confirmation flow
       if (agentSuggestion.type === 'warning' || agentSuggestion.type === 'pattern') {
-          // Wrap in ASK_CONFIRMATION logic logic visually
-          // But technically executeIAAction handles ASK_CONFIRMATION types.
-          // Since agentSuggestion.actionData is already an IAAction, we pass it.
-          // If the suggestion action IS an ASK_CONFIRMATION, executeIAAction will handle it.
-          // If it is a direct action (like CREATE_TASK), we just execute.
-          
           await executeIAAction(agentSuggestion.actionData);
           setAgentSuggestion(null);
       } 
@@ -162,8 +169,13 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
         // 4. MAIN CHAT FLOW (Chat -> Engine -> Context)
         const history = messages.filter(m => m.type === 'text').map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
         
-        // 4.1 Get Raw Response from LLM
-        const rawResponse = await chatWithMaya(userMsg, history, isThinkingMode ? 'thinking' : 'fast');
+        // 4.1 Get Raw Response from LLM (Now Passing APP CONTEXT with Team Info)
+        const rawResponse = await chatWithMaya(
+            userMsg, 
+            history, 
+            isThinkingMode ? 'thinking' : 'fast',
+            { tasks, events, history: iaHistory, currentTeam, userRole }
+        );
 
         // 4.2 Parse response through the Engine
         const parsedResponse = parseIAResponse(rawResponse);
@@ -196,7 +208,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="w-full max-w-lg bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl flex flex-col overflow-hidden relative border border-white/20 h-[600px] animate-fade-in">
+      <div className="w-full max-w-lg bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl flex flex-col overflow-hidden relative border border-white/20 h-[500px] max-h-[85vh] animate-fade-in">
         
         {/* Header */}
         <div className="p-4 border-b border-gray-100 dark:border-white/5 flex justify-between items-center bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md">
@@ -206,7 +218,10 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                 </div>
                 <div>
                     <h3 className="font-bold dark:text-white">Maya AI</h3>
-                    <p className="text-xs text-green-500 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online ({personality})</p>
+                    <p className="text-xs text-green-500 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> 
+                        {currentTeam ? `${currentTeam.name}` : 'Pessoal'} ({personality})
+                    </p>
                 </div>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={20} className="dark:text-white" /></button>
@@ -274,8 +289,51 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                 </div>
             ))}
 
-            {/* Pending Action Confirmation UI */}
-            {pendingAction && (
+            {/* Phase 5: NEGOTIATE_DEADLINE UI */}
+            {pendingAction && pendingAction.originalAction.type === 'NEGOTIATE_DEADLINE' && (
+                <div className="flex justify-start animate-slide-up w-full">
+                    <div className="bg-white dark:bg-zinc-800 p-5 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-orange-500 w-full">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Handshake className="text-orange-500" size={20} />
+                            <p className="font-bold text-gray-800 dark:text-white text-sm">Proposta de Negociação</p>
+                        </div>
+                        
+                        <p className="text-gray-600 dark:text-gray-300 text-sm mb-4 leading-relaxed bg-gray-50 dark:bg-black/20 p-3 rounded-lg">
+                           {pendingAction.originalAction.payload.reason}
+                        </p>
+
+                        <div className="space-y-2">
+                            {pendingAction.originalAction.payload.options.map((option, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => handleNegotiationOption(option)}
+                                    className={`w-full text-left p-3 rounded-xl border text-sm font-medium transition-all hover:translate-x-1 flex items-center justify-between group
+                                        ${option.style === 'primary' 
+                                            ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200 hover:bg-purple-100' 
+                                            : option.style === 'secondary'
+                                                ? 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300'
+                                                : 'border-dashed border-gray-300 dark:border-gray-700 text-gray-500 hover:text-red-500 hover:border-red-300'
+                                        }
+                                    `}
+                                >
+                                    <span>{option.label}</span>
+                                    <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </button>
+                            ))}
+                        </div>
+                        
+                        <button 
+                            onClick={cancelAction}
+                            className="mt-3 text-xs text-gray-400 hover:text-gray-600 w-full text-center hover:underline"
+                        >
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Standard Confirmation UI (Only if NOT negotiation) */}
+            {pendingAction && pendingAction.originalAction.type !== 'NEGOTIATE_DEADLINE' && (
                 <div className="flex justify-start animate-slide-up">
                     <div className="bg-white dark:bg-zinc-800 p-4 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-custom-caramel">
                         <p className="font-bold text-gray-800 dark:text-white mb-3 text-sm">{pendingAction.question}</p>

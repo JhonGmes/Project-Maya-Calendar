@@ -1,5 +1,5 @@
 
-import { CalendarEvent, Task, UserProfile, IAMessage, Notification, ScoreHistory, Team, QuarterlyGoal } from '../types';
+import { CalendarEvent, Task, UserProfile, IAMessage, Notification, ScoreHistory, Team, QuarterlyGoal, FocusSession } from '../types';
 import { supabase } from './supabaseClient';
 
 const LOCAL_STORAGE_KEYS = {
@@ -11,7 +11,8 @@ const LOCAL_STORAGE_KEYS = {
   NOTIFICATIONS: 'maya_notifications',
   HISTORY: 'maya_score_history',
   TEAMS: 'maya_teams',
-  GOALS: 'maya_quarter_goals' // Phase 26
+  GOALS: 'maya_quarter_goals',
+  FOCUS_SESSION: 'maya_focus_session' // Phase 4
 };
 
 const defaultProfile: UserProfile = {
@@ -375,6 +376,16 @@ export const StorageService = {
       const goals = data ? JSON.parse(data) : [];
       goals.push({ id: generateId(), title, achieved: false, quarter: 'Current' });
       localStorage.setItem(LOCAL_STORAGE_KEYS.GOALS, JSON.stringify(goals));
+  },
+  
+  // Phase 4: Focus Session
+  getFocusSession: (): FocusSession => {
+      const data = localStorage.getItem(LOCAL_STORAGE_KEYS.FOCUS_SESSION);
+      return data ? JSON.parse(data) : { isActive: false, taskId: null, startTime: null, plannedDuration: 25 };
+  },
+
+  saveFocusSession: (session: FocusSession) => {
+      localStorage.setItem(LOCAL_STORAGE_KEYS.FOCUS_SESSION, JSON.stringify(session));
   },
   
   generateId

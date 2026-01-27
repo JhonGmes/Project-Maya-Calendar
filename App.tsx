@@ -8,11 +8,14 @@ import { CalendarGrid } from './components/CalendarGrid';
 import { TaskView } from './components/TaskView';
 import { RoutineView } from './components/RoutineView';
 import { WeeklyView } from './components/WeeklyView'; 
+import { AnalyticsView } from './components/AnalyticsView'; // Phase 6
 import { Login } from './components/Login';
 import { MayaModal } from './components/MayaModal';
 import { EventModal } from './components/EventModal';
 import { SettingsModal } from './components/SettingsModal';
 import { NotificationsModal } from './components/NotificationsModal';
+import { IAConfirmationModal } from './components/IAConfirmationModal';
+import { FocusOverlay } from './components/FocusOverlay';
 import { ToastContainer } from './components/Toast';
 import { ViewMode, CalendarEvent } from './types';
 import { Menu, Plus, Sparkles, Loader2 } from 'lucide-react';
@@ -108,6 +111,8 @@ const AppContent = () => {
                   tasks={tasks}
                   onToggleTask={(id) => { const t = tasks.find(x => x.id === id); if(t) updateTask({...t, completed: !t.completed}); }} 
                />;
+      case 'analytics': // Phase 6
+        return <AnalyticsView />;
       default:
         return <Dashboard events={events} tasks={tasks} onEventClick={handleEventClick} onAddTask={addTask} onToggleTask={() => {}} onConvertTaskToEvent={() => {}} />;
     }
@@ -147,7 +152,10 @@ const AppContent = () => {
         </div>
       </main>
 
-      {/* Modals */}
+      {/* Modals & Overlays */}
+      <FocusOverlay />
+      <IAConfirmationModal />
+      
       <MayaModal isOpen={isMayaOpen} onClose={() => setMayaOpen(false)} onAction={handleAIAction} allTasks={tasks} allEvents={events} />
       
       <EventModal 

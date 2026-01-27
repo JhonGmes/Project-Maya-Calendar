@@ -24,8 +24,13 @@ export interface Task {
   dueDate?: Date;
   priority: TaskPriority;
   description?: string;
-  teamId?: string; 
+  teamId?: string;
+  assigneeId?: string; // Phase 7
+  estimatedTime?: number; // Estimated time in hours (default 1)
 }
+
+// Phase 7: Roles
+export type UserRole = 'admin' | 'manager' | 'member';
 
 export interface UserProfile {
   id: string;
@@ -33,7 +38,7 @@ export interface UserProfile {
   email: string;
   avatarUrl?: string;
   phone?: string;
-  role?: string;
+  role?: string; // Legacy string, prefer using UserRole logic in App
   bio?: string;
   workingHours: {
     start: string;
@@ -55,6 +60,14 @@ export interface Team {
   name: string;
   ownerId: string;
   companyId?: string; // Phase 27
+  members?: TeamMember[];
+}
+
+export interface TeamMember {
+    userId: string;
+    name: string;
+    role: UserRole;
+    avatarUrl?: string;
 }
 
 export interface AppSettings {
@@ -63,7 +76,8 @@ export interface AppSettings {
   endHour: number;
 }
 
-export type ViewMode = 'day' | 'week' | 'month' | 'tasks' | 'routine';
+// Phase 6: Analytics
+export type ViewMode = 'day' | 'week' | 'month' | 'tasks' | 'routine' | 'analytics';
 
 export interface IAMessage {
   id: string;
@@ -80,7 +94,39 @@ export interface TimeSuggestion {
     reason: string;
 }
 
-// --- FASE 2: IA COMO AGENTE DO SISTEMA ---
+// Phase 4: Focus Session
+export interface FocusSession {
+    isActive: boolean;
+    taskId: string | null;
+    startTime: string | null; // ISO String
+    plannedDuration: number; // minutes
+}
+
+// Phase 6: Weekly Stats
+export interface WeeklyStats {
+  weekLabel: string; // "Semana 12" or "10/05 - 17/05"
+  productivityScore: number;
+  completedTasks: number;
+  postponedTasks: number;
+  burnoutLevel: "low" | "medium" | "high";
+}
+
+// --- FASE 2 & 3: IA COMO AGENTE DO SISTEMA ---
+
+// Definição da mudança individual em uma reorganização
+export interface TaskChange {
+    taskId: string;
+    taskTitle: string;
+    from: string; // ISO String
+    to: string;   // ISO String
+}
+
+// Phase 5: Negotiation Option
+export interface NegotiationOption {
+    label: string;
+    action: IAAction;
+    style?: 'primary' | 'secondary' | 'outline';
+}
 
 // Definição estrita das ações que a IA pode solicitar
 export type IAAction =
@@ -90,6 +136,7 @@ export type IAAction =
         title: string;
         priority?: TaskPriority;
         dueDate?: string; // ISO String
+        assigneeId?: string; // Phase 7
       };
     }
   | {
@@ -111,14 +158,42 @@ export type IAAction =
       };
     }
   | {
+      type: "REORGANIZE_WEEK";
+      payload: {
+          changes: TaskChange[];
+          reason: string;
+      };
+    }
+  | {
       type: "CHANGE_SCREEN";
       payload: ViewMode;
+    }
+  | {
+      type: "START_FOCUS";
+      payload: {
+          taskId: string;
+          duration?: number;
+      };
+    }
+  | {
+      type: "END_FOCUS";
+      payload: {
+          completed: boolean;
+      };
     }
   | {
       type: "ASK_CONFIRMATION";
       payload: {
         message: string;
         action: IAAction; // Ação aninhada a ser executada após confirmação
+      };
+    }
+  | {
+      type: "NEGOTIATE_DEADLINE";
+      payload: {
+          taskTitle: string;
+          reason: string;
+          options: NegotiationOption[];
       };
     }
   | {
@@ -143,6 +218,18 @@ export interface PendingActionState {
   question: string;         // A pergunta feita pela IA
 }
 
+// Phase 3: Histórico de Ações
+export interface IAHistoryItem {
+  timestamp: string;
+  action: IAAction;
+  source: "user" | "ai";
+}
+
+export interface BurnoutAnalysis {
+    level: "high" | "medium" | "low";
+    signals: string[];
+}
+
 // Phase 18
 export interface Notification {
   id: string;
@@ -163,7 +250,7 @@ export type PersonalityType = "disciplinado" | "sobrecarregado" | "neutro";
 
 export interface AgentSuggestion {
     id: string;
-    type: 'optimization' | 'warning' | 'pattern';
+    type: 'optimization' | 'warning' | 'pattern' | 'focus_coach';
     message: string;
     actionLabel: string;
     actionData: IAAction;
@@ -175,4 +262,6 @@ export interface QuarterlyGoal {
     title: string;
     achieved: boolean;
     quarter: string;
+    metric?: string; // New field for smart goals
+    targetValue?: string; // New field for smart goals
 }

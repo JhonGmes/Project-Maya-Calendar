@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Content } from "@google/genai";
-import { IAResponse } from "../types";
+import { IAResponse, Task, CalendarEvent, IAHistoryItem, Team, UserRole } from "../types";
+import { buildIAContext } from "../utils/iaContextBuilder";
 
 // --- ENVIRONMENT SHIM ---
 try {
@@ -58,7 +59,12 @@ function cleanHistory(history: any[]): Content[] {
  * Nova função de chat que espera uma resposta estruturada (JSON)
  * compatível com o IAActionEngine.
  */
-export const chatWithMaya = async (message: string, history: any[], mode: 'fast' | 'thinking' = 'fast'): Promise<string> => {
+export const chatWithMaya = async (
+    message: string, 
+    history: any[], 
+    mode: 'fast' | 'thinking' = 'fast',
+    appContext?: { tasks: Task[], events: CalendarEvent[], history: IAHistoryItem[], currentTeam?: Team | null, userRole?: UserRole }
+): Promise<string> => {
   try {
     const ai = getAI();
     
@@ -69,36 +75,44 @@ export const chatWithMaya = async (message: string, history: any[], mode: 'fast'
     const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
     const dayName = days[now.getDay()];
 
+    // Construir o contexto dinâmico
+    const dynamicContext = appContext 
+        ? buildIAContext(appContext.tasks, appContext.events, appContext.history, appContext.currentTeam, appContext.userRole)
+        : "No context provided.";
+
     const modelName = mode === 'thinking' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
 
-    // O Prompt do Sistema agora define o protocolo de comunicação
+    // O Prompt do Sistema agora define o protocolo de comunicação E PERSONA DE GESTÃO
     const systemPrompt = `
-    You are Maya, an advanced AI system agent for productivity.
+    You are Maya, an advanced AI system agent for productivity and team management.
     Current Time: ${now.toISOString()} (${dayName}).
+    
+    APP CONTEXT (READ-ONLY):
+    ${dynamicContext}
     
     PROTOCOL:
     1. You act as an intermediary between the user and the app state.
     2. You DO NOT execute actions yourself. You return JSON instructions.
-    3. You MUST ALWAYS return a valid JSON object with this structure:
-    {
-      "message": "Friendly response to the user",
-      "actions": [
-         { "type": "ACTION_TYPE", "payload": { ... } }
-      ]
-    }
+    3. You MUST ALWAYS return a valid JSON object.
+    
+    PERSONA & BEHAVIOR:
+    - If contextMode is 'PERSONAL_MODE': Focus on execution, focus, and clearing the user's daily schedule.
+    - If contextMode is 'TEAM_MODE' and userRole is 'manager': Focus on team alignment, identifying bottlenecks, and preventing burnout. Do not micromanage individual task completion unless asked. Suggest 'REORGANIZE_WEEK' if the whole team is overloaded.
+    - If contextMode is 'TEAM_MODE' and userRole is 'member': Focus on the user's assigned tasks within the team context.
 
     AVAILABLE ACTIONS (Types):
     - CREATE_TASK: { title: string, priority?: 'high'|'medium'|'low', dueDate?: string (ISO) }
     - CREATE_EVENT: { title: string, start: string (ISO), end?: string (ISO), category?: string }
     - RESCHEDULE_TASK: { taskId: string, newDate: string (ISO) }
-    - CHANGE_SCREEN: { payload: 'day'|'week'|'month'|'tasks' }
+    - REORGANIZE_WEEK: { changes: [{ taskId: string, taskTitle: string, from: string (ISO), to: string (ISO) }], reason: string }
+    - CHANGE_SCREEN: { payload: 'day'|'week'|'month'|'tasks'|'analytics' }
     - ASK_CONFIRMATION: { message: string, action: ActionObject } 
-      (Use ASK_CONFIRMATION when the action is significant, like rescheduling many tasks or deleting).
-    - NO_ACTION: {} (Use when just chatting).
+    - NEGOTIATE_DEADLINE: { taskTitle: string, reason: string, options: [{ label: string, action: ActionObject }] }
+    - NO_ACTION: {} 
 
     RULES:
-    - If the user implies a relative date (e.g., "tomorrow at 2pm"), calculate the ISO string based on Current Time.
-    - If the user message is just conversation, return "actions": [].
+    - If user says "My week is messy" or overload is detected, propose REORGANIZE_WEEK.
+    - If user asks about performance, use CHANGE_SCREEN to 'analytics'.
     - Be concise in the "message" field.
     - Response MUST be raw JSON, no markdown blocks.
     `;
@@ -123,7 +137,6 @@ export const chatWithMaya = async (message: string, history: any[], mode: 'fast'
 
   } catch (error: any) {
     console.error("Chat Error Details:", error);
-    // Retorna um JSON de erro válido para o Engine não quebrar
     return JSON.stringify({
         message: "Desculpe, tive um erro de conexão. Tente novamente.",
         actions: []

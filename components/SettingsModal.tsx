@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
-import { X, Moon, Sun, Bell, User, FileText, Key, Eye, EyeOff, Save, AlertTriangle, CheckCircle } from 'lucide-react';
+import { X, Moon, Sun, Bell, User, FileText, Key, Eye, EyeOff, Save, AlertTriangle, CheckCircle, LogOut } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, profile, onSaveProfile }) => {
   const { generateReport, currentTeam } = useApp();
+  const { signOut } = useAuth();
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
@@ -154,14 +156,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
                 </div>
             </div>
 
-            {/* Weekly Report Trigger */}
-             <div className="space-y-4 pt-4 border-t border-gray-100 dark:border-white/10">
+            {/* Weekly Report & Logout */}
+             <div className="space-y-3 pt-4 border-t border-gray-100 dark:border-white/10">
                 <button 
                     onClick={() => { generateReport(); onClose(); }}
                     className="w-full flex items-center justify-center gap-2 p-3 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded-xl hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors font-medium text-sm"
                 >
                     <FileText size={18} />
                     Gerar Relatório Semanal (IA)
+                </button>
+
+                <button 
+                    onClick={() => { onClose(); signOut(); }}
+                    className="w-full flex items-center justify-center gap-2 p-3 bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-300 rounded-xl hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors font-medium text-sm"
+                >
+                    <LogOut size={18} />
+                    Sair da Conta
                 </button>
             </div>
         </div>

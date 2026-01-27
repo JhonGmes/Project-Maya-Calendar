@@ -1,10 +1,11 @@
 
-import { Task, CalendarEvent } from '../types';
+
+import { Task, CalendarEvent, IAHistoryItem } from '../types';
 import { analyzePatterns } from './userPatterns';
 import { generateWeeklyPlan, formatWeeklyPlan } from './weeklyPlanner';
-import { reorganizeWeek } from './weekReorganizer';
-import { proposeNewDeadline } from './deadlineNegotiator';
-import { generateQuarterGoals } from './quarterPlanner'; // Phase 26
+import { generateReorganizationPlan } from './weekReorganizer';
+import { checkDeadlineViability } from './deadlineNegotiator'; // Phase 5
+import { generateQuarterGoals } from './quarterPlanner';
 
 export type IAIntent =
   | "criar_tarefa"
@@ -14,10 +15,12 @@ export type IAIntent =
   | "criar_evento"
   | "planejar_semana"
   | "reorganizar_semana"
-  | "definir_metas"; // Phase 26
+  | "definir_metas"
+  | "iniciar_foco"
+  | "parar_foco";
 
 export interface IAAction {
-  action: "ADD_TASK" | "ADD_EVENT" | "CHANGE_SCREEN" | "REPLY" | "REORGANIZE_WEEK" | "NEGOTIATE_DEADLINE" | "SAVE_GOALS" | "UNKNOWN";
+  action: "ADD_TASK" | "ADD_EVENT" | "CHANGE_SCREEN" | "REPLY" | "REORGANIZE_WEEK" | "NEGOTIATE_DEADLINE" | "SAVE_GOALS" | "RESCHEDULE_TASK" | "START_FOCUS" | "END_FOCUS" | "UNKNOWN";
   payload: any;
   needsConfirmation?: boolean; 
   question?: string;           
@@ -25,6 +28,9 @@ export interface IAAction {
 
 export function detectIntent(text: string): IAIntent {
   const lower = text.toLowerCase();
+  if (lower.includes("focar") || lower.includes("concentrar") || lower.includes("modo foco")) return "iniciar_foco";
+  if (lower.includes("parar foco") || lower.includes("descansar") || lower.includes("terminar foco")) return "parar_foco";
+  
   if (lower.includes("tarefa") && (lower.includes("nova") || lower.includes("criar") || lower.includes("adicionar"))) return "criar_tarefa";
   if (lower.includes("evento") || lower.includes("reunião") || lower.includes("agendar")) return "criar_evento";
   if (lower.includes("ver tarefas") || lower.includes("minhas tarefas")) return "listar_tarefas";
@@ -35,31 +41,66 @@ export function detectIntent(text: string): IAIntent {
   return "conversar";
 }
 
-export function processIAInput(text: string, context: { tasks: Task[], events: CalendarEvent[] }): IAAction {
+export function processIAInput(text: string, context: { tasks: Task[], events: CalendarEvent[], history?: IAHistoryItem[] }): IAAction {
   const intent = detectIntent(text);
   
   switch (intent) {
+    case "iniciar_foco":
+        // Find highest priority pending task
+        const pending = context.tasks.filter(t => !t.completed).sort((a,b) => {
+            if (a.priority === 'high' && b.priority !== 'high') return -1;
+            return 0;
+        });
+        const focusTask = pending[0];
+        
+        if (!focusTask) {
+            return {
+                action: "REPLY",
+                payload: "Você não tem tarefas pendentes para focar agora!"
+            };
+        }
+
+        return {
+            action: "START_FOCUS",
+            needsConfirmation: true,
+            question: `Quer entrar no Modo Foco para a tarefa "${focusTask.title}"?`,
+            payload: {
+                taskId: focusTask.id,
+                duration: 25
+            }
+        };
+
+    case "parar_foco":
+        return {
+            action: "END_FOCUS",
+            payload: { completed: false }
+        };
+
     case "criar_tarefa":
       const taskTitle = text.replace(/(criar|nova|adicionar) tarefa/gi, '').trim();
       
-      const proposedDeadline = proposeNewDeadline(context.tasks);
-      if (proposedDeadline) {
-          return {
-              action: "NEGOTIATE_DEADLINE",
-              needsConfirmation: true,
-              question: `Sua agenda está bem cheia (>5 pendentes). Posso agendar "${taskTitle}" direto para amanhã (${proposedDeadline.getDate()}/${proposedDeadline.getMonth()+1}) para evitar sobrecarga?`,
-              payload: {
-                  title: taskTitle,
-                  dueDate: proposedDeadline
-              }
-          };
-      }
-
+      // Determine suggested date based on patterns
       const patterns = analyzePatterns(context.tasks);
       const suggestedDate = new Date();
       suggestedDate.setHours(patterns.preferredTaskHour, 0, 0, 0);
-      if (suggestedDate < new Date()) {
+      
+      // Logic: If past preferred hour, move to tomorrow
+      if (new Date().getHours() >= patterns.preferredTaskHour) {
           suggestedDate.setDate(suggestedDate.getDate() + 1); 
+      }
+
+      // Phase 5: Check for Negotiation Trigger
+      const negotiationAction = checkDeadlineViability(taskTitle, suggestedDate, context.tasks);
+      
+      if (negotiationAction && negotiationAction.type === 'NEGOTIATE_DEADLINE') {
+          // Wrap it in the Engine's response structure
+          // Note: checkDeadlineViability returns a full IAAction of type NEGOTIATE_DEADLINE
+          return {
+              action: "NEGOTIATE_DEADLINE", // This maps to the frontend Handler
+              payload: negotiationAction.payload,
+              needsConfirmation: true, // Forces UI to show modal
+              question: "Preciso negociar esse prazo com você."
+          };
       }
 
       return {
@@ -97,7 +138,7 @@ export function processIAInput(text: string, context: { tasks: Task[], events: C
        };
 
     case "reorganizar_semana":
-        const newPlan = reorganizeWeek(context.tasks);
+        const newPlan = generateReorganizationPlan(context.tasks);
         return {
             action: "REORGANIZE_WEEK",
             needsConfirmation: true,
@@ -106,7 +147,7 @@ export function processIAInput(text: string, context: { tasks: Task[], events: C
         };
     
     case "definir_metas":
-        const goals = generateQuarterGoals(context.tasks);
+        const goals = generateQuarterGoals(context.tasks, context.history || []);
         const goalsText = goals.map(g => `• ${g.title}`).join('\n');
         return {
             action: "SAVE_GOALS",
