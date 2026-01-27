@@ -18,13 +18,17 @@ export function observeState(tasks: Task[]): AgentSuggestion | null {
             message: `Você tem ${overdueTasks.length} tarefas atrasadas. Quer que eu mova todas para amanhã de manhã?`,
             actionLabel: 'Reagendar Atrasadas',
             actionData: {
-                action: 'RESCHEDULE_TASK',
+                type: "ASK_CONFIRMATION",
                 payload: {
-                    taskIds: overdueTasks.map(t => t.id),
-                    newDate: setMinutes(setHours(addDays(new Date(), 1), 9), 0) // Amanhã 09:00
-                },
-                needsConfirmation: true,
-                question: `Confirma mover ${overdueTasks.length} tarefas para amanhã às 09:00?`
+                    message: `Confirma mover ${overdueTasks.length} tarefas para amanhã às 09:00?`,
+                    action: {
+                        type: "RESCHEDULE_TASK",
+                        payload: {
+                            taskIds: overdueTasks.map(t => t.id),
+                            newDate: setMinutes(setHours(addDays(new Date(), 1), 9), 0).toISOString() // Amanhã 09:00
+                        }
+                    }
+                }
             }
         };
     }
@@ -39,22 +43,26 @@ export function observeState(tasks: Task[]): AgentSuggestion | null {
             hourCounts[h] = (hourCounts[h] || 0) + 1;
         });
         
-        const bestHour = Object.entries(hourCounts).sort((a,b) => b[1] - a[1])[0];
-        if (bestHour) {
-            const hour = parseInt(bestHour[0]);
+        const bestHourEntry = Object.entries(hourCounts).sort((a,b) => b[1] - a[1])[0];
+        if (bestHourEntry) {
+            const hour = parseInt(bestHourEntry[0]);
             return {
                 id: 'pattern_scheduler',
                 type: 'pattern',
                 message: `Notei que você é mais produtivo por volta das ${hour}h. Quer agendar suas tarefas sem prazo para esse horário amanhã?`,
                 actionLabel: `Agendar para ${hour}h`,
                 actionData: {
-                    action: 'RESCHEDULE_TASK',
+                    type: "ASK_CONFIRMATION",
                     payload: {
-                        taskIds: pendingTasks.filter(t => !t.dueDate).map(t => t.id),
-                        newDate: setMinutes(setHours(addDays(new Date(), 1), hour), 0)
-                    },
-                    needsConfirmation: true,
-                    question: `Posso definir o prazo dessas tarefas para amanhã às ${hour}:00?`
+                        message: `Posso definir o prazo dessas tarefas para amanhã às ${hour}:00?`,
+                        action: {
+                            type: "RESCHEDULE_TASK",
+                            payload: {
+                                taskIds: pendingTasks.filter(t => !t.dueDate).map(t => t.id),
+                                newDate: setMinutes(setHours(addDays(new Date(), 1), hour), 0).toISOString()
+                            }
+                        }
+                    }
                 }
             };
         }
@@ -70,9 +78,10 @@ export function observeState(tasks: Task[]): AgentSuggestion | null {
             message: `Foco total em "${highPriority[0].title}". Quer que eu esconda as outras tarefas por enquanto? (Simulação)`,
             actionLabel: 'Focar Agora',
             actionData: {
-                action: 'REPLY', // Placeholder para funcionalidade futura de filtro visual
-                payload: 'Ótimo! Imagine que as outras tarefas sumiram. Mãos à obra!',
-                needsConfirmation: false
+                type: "REPLY",
+                payload: {
+                    message: 'Ótimo! Imagine que as outras tarefas sumiram. Mãos à obra!'
+                }
             }
         };
     }

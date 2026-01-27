@@ -2,8 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight } from 'lucide-react';
 import { generateImage, generateSpeech, chatWithMaya, editImage } from '../services/geminiService';
-import { processIAInput } from '../utils/iaEngine';
-import { executeIAAction } from '../utils/iaActions';
+import { parseIAResponse } from '../utils/iaActionEngine';
 import { adaptTone } from '../utils/personalityEngine';
 import { CalendarEvent, Task } from '../types';
 import { useApp } from '../context/AppContext';
@@ -16,9 +15,9 @@ interface MayaModalProps {
   allEvents: CalendarEvent[];
 }
 
-export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks, allEvents }) => {
+export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   const appContext = useApp();
-  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality, agentSuggestion, setAgentSuggestion } = appContext;
+  const { messages, addMessage, setIaStatus, iaStatus, pendingAction, setPendingAction, personality, agentSuggestion, setAgentSuggestion, executeIAAction } = appContext;
 
   const [input, setInput] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -57,33 +56,15 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
       }
   };
 
-  // Helper validation logic
-  const canCreateEvent = (start: Date) => {
-      if (isNaN(start.getTime())) return false;
-      const now = new Date();
-      // Allow 5 min tolerance for "now" events
-      return start.getTime() >= (now.getTime() - 5 * 60000);
-  };
-
-  // Phase 2: Handle Explicit Confirmation Buttons
+  // --- NEW: Execute Pending Action ---
   const confirmAction = async () => {
       if (!pendingAction) return;
       
       setIaStatus('executing');
       try {
-          if (pendingAction.question === 'CONFIRM_PAST_EVENT') {
-               const data = pendingAction.data;
-               await appContext.addEvent({
-                    title: data.title,
-                    start: new Date(data.start),
-                    end: data.end ? new Date(data.end) : new Date(new Date(data.start).getTime() + 3600000),
-                    category: data.category || 'work',
-                    location: data.location
-               });
-               sendAIMessage(`📅 Evento passado registrado: "${data.title}" em ${new Date(data.start).toLocaleString()}.`);
-          } else {
-               await executeIAAction(pendingAction.action, appContext, (text) => sendAIMessage(text));
-          }
+           // Executa a ação original armazenada no estado
+           await executeIAAction(pendingAction.originalAction);
+           sendAIMessage("Feito!");
       } catch (e) {
           sendAIMessage("Ocorreu um erro ao executar a ação.");
       }
@@ -96,25 +77,22 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
       sendAIMessage("Ação cancelada.");
   };
 
+  // --- NEW: Accept Agent Suggestion ---
   const acceptSuggestion = async () => {
       if (!agentSuggestion) return;
       
-      // If it needs confirmation, set it as pending
-      if (agentSuggestion.actionData.needsConfirmation) {
-          setPendingAction({
-              action: agentSuggestion.actionData,
-              question: agentSuggestion.actionData.question || "Confirma esta ação?"
-          });
-          setAgentSuggestion(null); // Clear suggestion as it is now pending
-          // Trigger a message to context
-          addMessage({ id: Date.now().toString(), sender: 'maya', text: agentSuggestion.message });
-      } else {
-          // Execute immediately
-          setIaStatus('executing');
-          await executeIAAction(agentSuggestion.actionData, appContext, (text) => sendAIMessage(text));
+      // Agent Suggestions are basically pre-packaged IA Actions
+      // If the suggestion type implies a confirmation, we trigger the confirmation flow
+      if (agentSuggestion.type === 'warning' || agentSuggestion.type === 'pattern') {
+          // Wrap in ASK_CONFIRMATION logic logic visually
+          // But technically executeIAAction handles ASK_CONFIRMATION types.
+          // Since agentSuggestion.actionData is already an IAAction, we pass it.
+          // If the suggestion action IS an ASK_CONFIRMATION, executeIAAction will handle it.
+          // If it is a direct action (like CREATE_TASK), we just execute.
+          
+          await executeIAAction(agentSuggestion.actionData);
           setAgentSuggestion(null);
-          setIaStatus('idle');
-      }
+      } 
   };
 
   const handleSend = async () => {
@@ -135,23 +113,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
     try {
         const lower = userMsg.toLowerCase().trim();
 
-        // 1. Pending Action Text Reply (Fallback if user types instead of clicking)
-        if (pendingAction) {
-            const isYes = ['sim', 'yes', 'confirmar', 'claro'].some(w => lower === w || lower.startsWith(w + ' ') || lower.endsWith(' ' + w));
-            const isNo = ['não', 'nao', 'no', 'cancelar'].some(w => lower === w || lower.startsWith(w + ' '));
-
-            if (isYes) {
-                await confirmAction();
-                return;
-            } else if (isNo) {
-                cancelAction();
-                return;
-            }
-            // If text is not yes/no, continue to normal processing (user ignored question)
-            setPendingAction(null); 
-        }
-
-        // 2. Image Editing
+        // 1. Image Editing
         if (selectedImage) {
              const editPrompt = userMsg || "Descreva esta imagem";
              const editedImage = await editImage(selectedImage, editPrompt);
@@ -164,7 +126,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
              return;
         }
 
-        // 3. Image Generation
+        // 2. Image Generation
         if (lower.startsWith('gerar imagem') || lower.startsWith('crie uma imagem')) {
             const prompt = userMsg.replace(/gerar imagem|crie uma imagem/i, '').trim();
             const imageUrl = await generateImage(prompt, "1K");
@@ -176,7 +138,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
             return;
         } 
 
-        // 4. TTS
+        // 3. TTS
         if (lower.startsWith('fale') || lower.startsWith('diga')) {
              const textToSpeak = userMsg.replace(/fale|diga/i, '').trim();
              const audioData = await generateSpeech(textToSpeak);
@@ -197,85 +159,21 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
              return;
         }
 
-        // 5. Intelligent Chat with Tool Calling (Gemini 3 Flash or Pro Thinking)
+        // 4. MAIN CHAT FLOW (Chat -> Engine -> Context)
         const history = messages.filter(m => m.type === 'text').map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
         
-        // Pass the mode (thinking vs fast)
-        const response = await chatWithMaya(userMsg, history, isThinkingMode ? 'thinking' : 'fast');
+        // 4.1 Get Raw Response from LLM
+        const rawResponse = await chatWithMaya(userMsg, history, isThinkingMode ? 'thinking' : 'fast');
 
-        if (response.toolCall) {
-            // Execute the tool requested by Gemini
-            const { name, args } = response.toolCall;
-            
-            if (name === 'create_task') {
-                let dueDate = undefined;
-                // Robust date parsing
-                if (args.dueDate) {
-                    const parsed = new Date(args.dueDate);
-                    if (!isNaN(parsed.getTime())) {
-                        dueDate = parsed;
-                    }
-                }
-                
-                await appContext.addTask(args.title, dueDate);
-                
-                const dateStr = dueDate ? dueDate.toLocaleDateString() : 'hoje (sem prazo definido)';
-                sendAIMessage(`✅ Tarefa criada: "${args.title}" para ${dateStr}.`);
-            } 
-            else if (name === 'create_event') {
-                const start = new Date(args.start);
-                
-                // --- Validation: Ensure Date is Valid ---
-                if (isNaN(start.getTime())) {
-                     sendAIMessage("Entendi que você quer criar um evento, mas a data ficou confusa. Pode repetir o horário?");
-                     return;
-                }
+        // 4.2 Parse response through the Engine
+        const parsedResponse = parseIAResponse(rawResponse);
 
-                // --- Business Rule: Check for Past Events ---
-                if (!canCreateEvent(start)) {
-                    setPendingAction({
-                        action: { action: 'ADD_EVENT', payload: args } as any,
-                        question: 'CONFIRM_PAST_EVENT',
-                        data: args
-                    });
-                    sendAIMessage(`⚠️ O horário solicitado (${start.toLocaleString()}) já passou. Deseja agendar mesmo assim?`);
-                    return;
-                }
+        // 4.3 Display the text message
+        sendAIMessage(parsedResponse.message);
 
-                await appContext.addEvent({
-                    title: args.title,
-                    start: start,
-                    end: args.end ? new Date(args.end) : new Date(start.getTime() + 3600000),
-                    category: args.category || 'work',
-                    location: args.location
-                });
-                sendAIMessage(`📅 Evento agendado: "${args.title}" em ${start.toLocaleString()}.`);
-            }
-            else if (name === 'create_routine') {
-                // Parse Time (HH:mm) into a Date for today
-                const [hours, minutes] = (args.time || "09:00").split(':').map(Number);
-                const start = new Date();
-                start.setHours(hours || 9, minutes || 0, 0, 0);
-                
-                const end = new Date(start);
-                end.setMinutes(start.getMinutes() + 30); // Default 30 min duration for routine
-
-                await appContext.addEvent({
-                    title: args.title,
-                    start: start,
-                    end: end,
-                    category: 'routine',
-                    isAllDay: false
-                });
-
-                sendAIMessage(`🔄 Rotina "${args.title}" registrada para hoje às ${args.time}.`);
-            }
-            else {
-                sendAIMessage(response.text);
-            }
-        } else {
-            // Just a text reply
-            sendAIMessage(response.text || "Não entendi, pode repetir?");
+        // 4.4 Execute actions
+        for (const action of parsedResponse.actions) {
+            await executeIAAction(action);
         }
 
     } catch (e) {
@@ -413,7 +311,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose, allTasks,
             )}
         </div>
 
-        {/* Selected Image Preview (Overlay above input) */}
+        {/* Selected Image Preview */}
         {selectedImage && (
              <div className="px-4 py-2 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
                  <div className="flex items-center gap-2">

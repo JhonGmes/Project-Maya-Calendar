@@ -1,5 +1,5 @@
 
-import { IAAction } from '../types';
+import { IAAction } from './iaEngine';
 import { AppContextData } from '../context/AppContext';
 import { ViewMode } from '../types';
 import { applyReorganization } from './weekReorganizer';

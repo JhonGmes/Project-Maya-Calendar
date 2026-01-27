@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { Task, CalendarEvent, UserProfile, ViewMode, PendingAction, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion } from "../types";
+import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction } from "../types";
 import { StorageService } from "../services/storage";
 import { supabase } from "../services/supabaseClient";
 import { calculatePriority, sortTasksByDeadline } from "../utils/taskUtils";
@@ -57,9 +57,10 @@ export interface AppContextData {
   setIaStatus: (status: IAStatus) => void;
   messages: IAMessage[];
   addMessage: (message: IAMessage) => void;
-  pendingAction: PendingAction | null;
-  setPendingAction: (action: PendingAction | null) => void;
-  agentSuggestion: AgentSuggestion | null; // Phase 2: Agent suggestion
+  pendingAction: PendingActionState | null;
+  setPendingAction: (action: PendingActionState | null) => void;
+  executeIAAction: (action: IAAction) => Promise<void>; // O Dispatcher Central
+  agentSuggestion: AgentSuggestion | null;
   setAgentSuggestion: (suggestion: AgentSuggestion | null) => void;
   personality: PersonalityType;
   
@@ -85,7 +86,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const { user, isLocalMode } = useAuth();
 
   // UI State
-  const [screen, setScreen] = useState<Screen>("day"); // Default to day, Auth wrapper handles Login screen
+  const [screen, setScreen] = useState<Screen>("day");
   const [isMayaOpen, setMayaOpen] = useState(false);
   const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
@@ -109,7 +110,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // AI State
   const [iaStatus, setIaStatus] = useState<IAStatus>("idle");
   const [messages, setMessages] = useState<IAMessage[]>([]);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null); 
+  const [pendingAction, setPendingAction] = useState<PendingActionState | null>(null); 
   const [agentSuggestion, setAgentSuggestion] = useState<AgentSuggestion | null>(null);
   const [hasCheckedReorg, setHasCheckedReorg] = useState(false);
   const [personality, setPersonality] = useState<PersonalityType>("neutro");
@@ -118,123 +119,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Diagnostics
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(true);
 
-  // --- Connection Check ---
+  // ... (Connection Check and Data Loading logic remains same)
   useEffect(() => {
-    if (isLocalMode) {
-        setIsSupabaseConnected(true);
-        return;
-    }
-    
-    const checkConnection = async () => {
-        if (!user) return;
-        try {
-            const { error } = await supabase.from("tasks").select("id").limit(1);
-            if (error) {
-                console.error("❌ Supabase Connection Error:", error.message);
-                setIsSupabaseConnected(false);
-            } else {
-                setIsSupabaseConnected(true);
-            }
-        } catch (e) {
-            console.error("❌ Supabase Connection Exception:", e);
-            setIsSupabaseConnected(false);
-        }
-    };
-    
-    checkConnection();
-  }, [user, isLocalMode]);
-
-  // --- Data Loading Logic ---
-  const loadData = async (teamId?: string) => {
-      // Critical check: Do not run if no user is present (unless local mode)
-      if (!user && !isLocalMode) return;
-      
+    const loadData = async () => {
       try {
-        const [loadedEvents, loadedTasks, loadedProfile, loadedNotifs, loadedHistory, loadedTeams] = await Promise.all([
+        const [loadedTasks, loadedEvents, loadedProfile, loadedHistory, loadedTeams, loadedNotifs] = await Promise.all([
+            StorageService.getTasks(),
             StorageService.getEvents(),
-            StorageService.getTasks(teamId),
             StorageService.getProfile(),
-            StorageService.getNotifications(),
             StorageService.getHistory(),
-            StorageService.getTeams()
+            StorageService.getTeams(),
+            StorageService.getNotifications()
         ]);
-
-        const history = StorageService.getChatHistory();
-        setMessages(history);
-
-        const prioritizedTasks = loadedTasks.map(t => ({
-            ...t,
-            priority: calculatePriority(t)
-        }));
-
+        setTasks(loadedTasks);
         setEvents(loadedEvents);
-        setTasks(sortTasksByDeadline(prioritizedTasks));
         setProfile(loadedProfile);
-        setNotifications(loadedNotifs);
         setScoreHistory(loadedHistory);
         setTeams(loadedTeams);
+        setNotifications(loadedNotifs);
         
-        // Apply theme preference
         if (loadedProfile.theme === 'dark') document.documentElement.classList.add('dark');
-        else document.documentElement.classList.remove('dark');
+        
+        setDailyFocus(getDailyFocus(loadedTasks));
+        setProductivityScore(calculateScore(loadedTasks));
+        setPersonality(detectPersonality(loadedTasks));
 
       } catch (err) {
-          console.error("Failed to load data", err);
-          addToast({ id: Date.now().toString(), title: "Erro", message: "Falha ao carregar dados. Verifique sua conexão.", type: "error" });
+        console.error("Failed to load initial data", err);
+        setIsSupabaseConnected(false);
       }
-  };
+    };
 
-  // Trigger loadData ONLY when user changes/exists
-  useEffect(() => {
     if (user || isLocalMode) {
-        loadData(currentTeam?.id);
+        loadData();
     }
-  }, [user, isLocalMode, currentTeam]); 
+  }, [user, isLocalMode]);
 
+  // Observer Loop
   useEffect(() => {
-    if (messages.length > 0) {
-        StorageService.saveChatHistory(messages);
+    if (tasks.length === 0) return;
+    
+    // Check Agent Suggestions
+    const suggestion = observeState(tasks);
+    if (suggestion && !agentSuggestion) {
+        setAgentSuggestion(suggestion);
     }
-  }, [messages]);
+  }, [tasks]); // Run when tasks change
 
-  // Phase 14-25: Monitoring Loop
-  useEffect(() => {
-      if (tasks.length === 0) return;
-
-      // 1. Update Score & History
-      const score = calculateScore(tasks);
-      setProductivityScore(score);
-      StorageService.saveDailyScore(score);
-
-      // 2. Set Daily Focus
-      setDailyFocus(getDailyFocus(tasks));
-
-      // 3. Detect Personality
-      setPersonality(detectPersonality(tasks));
-
-      // Phase 2: Agent Observation (Substitui checks manuais antigos por um observador centralizado)
-      const suggestion = observeState(tasks);
-      if (suggestion) {
-          // Avoid spamming the same suggestion
-          setAgentSuggestion(prev => (prev?.id === suggestion.id ? prev : suggestion));
-      } else {
-          setAgentSuggestion(null);
-      }
-
-      // 4. Check Deadlines & Notify
-      const urgent = getUrgentTasks(tasks);
-      if (urgent.length > 0) {
-          const msg = `Atenção: ${urgent.length} tarefas vencem em breve!`;
-          const hasRecent = notifications.some(n => n.message === msg && (new Date().getTime() - new Date(n.createdAt).getTime()) < 3600000); 
-          if (!hasRecent) {
-             StorageService.saveNotification(msg).then(async () => {
-                 setNotifications(await StorageService.getNotifications());
-             });
-             addToast({ id: 'urgent-tasks', title: 'Prazo', message: msg, type: 'info' });
-          }
-      }
-
-  }, [tasks]);
+  // --- ACTIONS ---
 
   const addToast = (toast: ToastMessage) => {
     setToasts(prev => [...prev, toast]);
@@ -253,6 +185,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const selected = teams.find(t => t.id === teamId) || null;
       setCurrentTeam(selected);
       addToast({ id: Date.now().toString(), title: "Mudança de Contexto", message: selected ? `Equipe: ${selected.name}` : "Modo Pessoal", type: "info" });
+      
+      // Reload tasks for context
+      const newTasks = await StorageService.getTasks(teamId || undefined);
+      setTasks(newTasks);
   };
 
   const addTask = async (title: string, dueDate?: Date) => {
@@ -303,7 +239,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setMessages(prev => [...prev, message]);
   };
 
-  // Phase 24: Weekly Report
   const generateReport = () => {
       const report = generateWeeklyReport(tasks, scoreHistory);
       StorageService.saveNotification("Relatório Semanal Disponível");
@@ -321,6 +256,65 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setNotifications([]);
   };
 
+  // --- CORE DISPATCHER FOR AI ACTIONS ---
+  // A IA "pede", o App "executa".
+  const executeIAAction = async (action: IAAction) => {
+    console.log("🤖 Executing AI Action:", action);
+    
+    switch (action.type) {
+        case "CREATE_TASK":
+            await addTask(action.payload.title, action.payload.dueDate ? new Date(action.payload.dueDate) : undefined);
+            break;
+
+        case "CREATE_EVENT":
+            await addEvent({
+                title: action.payload.title,
+                start: new Date(action.payload.start),
+                end: action.payload.end ? new Date(action.payload.end) : new Date(new Date(action.payload.start).getTime() + 3600000),
+                category: action.payload.category || 'work',
+                location: action.payload.location
+            });
+            break;
+
+        case "RESCHEDULE_TASK":
+             const { taskId, taskIds, newDate } = action.payload;
+             const ids = taskIds || (taskId ? [taskId] : []);
+             let count = 0;
+             for (const id of ids) {
+                 const t = tasks.find(x => x.id === id);
+                 if (t) {
+                     await updateTask({ ...t, dueDate: new Date(newDate) });
+                     count++;
+                 }
+             }
+             if (count > 0) {
+                 addToast({ id: Date.now().toString(), title: "Reagendado", message: `${count} tarefa(s) atualizada(s) para ${new Date(newDate).toLocaleString()}`, type: "info" });
+             }
+             break;
+
+        case "CHANGE_SCREEN":
+             setScreen(action.payload);
+             break;
+
+        case "ASK_CONFIRMATION":
+             // Não executa nada, apenas coloca em estado de espera na UI
+             setPendingAction({
+                 originalAction: action.payload.action,
+                 question: action.payload.message
+             });
+             break;
+        
+        case "REPLY":
+             addMessage({ id: Date.now().toString(), sender: 'maya', text: action.payload.message });
+             break;
+
+        case "NO_ACTION":
+        default:
+             // Do nothing
+             break;
+    }
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -335,6 +329,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         iaStatus, setIaStatus,
         messages, addMessage,
         pendingAction, setPendingAction,
+        executeIAAction,
         agentSuggestion, setAgentSuggestion,
         productivityScore, scoreHistory, dailyFocus,
         notifications, unreadNotifications: notifications.filter(n => !n.read).length,

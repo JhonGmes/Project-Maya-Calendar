@@ -65,13 +65,6 @@ export interface AppSettings {
 
 export type ViewMode = 'day' | 'week' | 'month' | 'tasks' | 'routine';
 
-export interface TimeSuggestion {
-  start: string;
-  end: string;
-  reason: string;
-  confidence: number;
-}
-
 export interface IAMessage {
   id: string;
   sender: "user" | "maya";
@@ -80,26 +73,74 @@ export interface IAMessage {
   content?: string;
 }
 
-// Phase 2 - Agent Types
-export interface AgentSuggestion {
-    id: string;
-    type: 'optimization' | 'warning' | 'pattern';
-    message: string;
-    actionLabel: string;
-    actionData: IAAction; // Link directly to Action Engine
+// Phase 28: Suggestions
+export interface TimeSuggestion {
+    start: string;
+    end: string;
+    reason: string;
 }
 
-export interface IAAction {
-  action: "ADD_TASK" | "ADD_EVENT" | "CHANGE_SCREEN" | "REPLY" | "REORGANIZE_WEEK" | "NEGOTIATE_DEADLINE" | "SAVE_GOALS" | "RESCHEDULE_TASK" | "UNKNOWN";
-  payload: any;
-  needsConfirmation?: boolean; 
-  question?: string;           
+// --- FASE 2: IA COMO AGENTE DO SISTEMA ---
+
+// Definição estrita das ações que a IA pode solicitar
+export type IAAction =
+  | {
+      type: "CREATE_TASK";
+      payload: {
+        title: string;
+        priority?: TaskPriority;
+        dueDate?: string; // ISO String
+      };
+    }
+  | {
+      type: "CREATE_EVENT";
+      payload: {
+        title: string;
+        start: string; // ISO String
+        end?: string; // ISO String
+        category?: EventCategory;
+        location?: string;
+      };
+    }
+  | {
+      type: "RESCHEDULE_TASK";
+      payload: {
+        taskId?: string;
+        taskIds?: string[];
+        newDate: string; // ISO String
+      };
+    }
+  | {
+      type: "CHANGE_SCREEN";
+      payload: ViewMode;
+    }
+  | {
+      type: "ASK_CONFIRMATION";
+      payload: {
+        message: string;
+        action: IAAction; // Ação aninhada a ser executada após confirmação
+      };
+    }
+  | {
+      type: "REPLY";
+      payload: {
+        message: string;
+      };
+    }
+  | {
+      type: "NO_ACTION";
+    };
+
+// Estrutura da resposta da IA vinda do Engine
+export interface IAResponse {
+  message: string;
+  actions: IAAction[];
 }
 
-export interface PendingAction {
-  action: IAAction;
-  question: string;
-  data?: any;
+// Estado de ação pendente para UI de confirmação
+export interface PendingActionState {
+  originalAction: IAAction; // Ação completa (ex: CREATE_TASK)
+  question: string;         // A pergunta feita pela IA
 }
 
 // Phase 18
@@ -119,6 +160,14 @@ export interface ScoreHistory {
 
 // Phase 22
 export type PersonalityType = "disciplinado" | "sobrecarregado" | "neutro";
+
+export interface AgentSuggestion {
+    id: string;
+    type: 'optimization' | 'warning' | 'pattern';
+    message: string;
+    actionLabel: string;
+    actionData: IAAction;
+}
 
 // Phase 26
 export interface QuarterlyGoal {
