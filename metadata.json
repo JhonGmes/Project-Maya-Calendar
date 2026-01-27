@@ -1,7 +1,5 @@
 {
   "name": "Maya Calendar",
   "description": "Um aplicativo de produtividade e calendário altamente visual e com inteligência artificial, que se chama Maya Assistent IA, sua assistente inteligente de agendamento.",
-  "requestFramePermissions": [
-    "microphone"
-  ]
+  "requestFramePermissions": []
 }

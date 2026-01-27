@@ -1,7 +1,8 @@
 
 import { Task, AgentSuggestion, IAHistoryItem, FocusSession } from '../types';
-import { isPast, isToday, addDays, setHours, setMinutes, differenceInMinutes } from 'date-fns';
+import { isPast, isToday, addDays, setHours, setMinutes, differenceInMinutes, getHours } from 'date-fns';
 import { detectBurnout } from './burnoutDetector';
+import { generateDailySummary } from './dailySummary';
 
 /**
  * Este é o "cérebro passivo" da Maya.
@@ -11,7 +12,8 @@ export function observeState(
     tasks: Task[], 
     history: IAHistoryItem[] = [], 
     currentScore: number = 50,
-    focusSession?: FocusSession
+    focusSession?: FocusSession,
+    scoreHistoryDates: Date[] = [] // Added for summary generation
 ): AgentSuggestion | null {
     
     // 0. Coaching de Foco (Prioridade Máxima se ativo)
@@ -32,17 +34,35 @@ export function observeState(
                 }
              };
         }
-        
-        // Encouragement at 50%
-        if (elapsed > 10 && elapsed < 15 && planned >= 25) {
-             // Returning null here to avoid spamming the user with modals, 
-             // but ideally this would update a "Coach Message" inside the Focus Overlay 
-             // without a blocking modal. For now, we only interrupt for breaks.
-             return null; 
-        }
-        
-        // Don't generate other suggestions while focusing
         return null;
+    }
+
+    // NEW: DAILY SUMMARY TRIGGER (Final do dia, após 17h, se houver atividade)
+    const currentHour = getHours(new Date());
+    if (currentHour >= 17) {
+        // Check if we already showed summary today
+        // Simple heuristic: check history for SHOW_SUMMARY action today
+        const hasShownSummary = history.some(h => 
+            h.action.type === 'SHOW_SUMMARY' && 
+            isToday(new Date(h.timestamp))
+        );
+
+        if (!hasShownSummary) {
+             const summary = generateDailySummary(tasks, history, scoreHistoryDates);
+             // Only show if there was some activity (score > 0)
+             if (summary.score > 0) {
+                 return {
+                     id: 'daily_summary_trigger',
+                     type: 'daily_summary',
+                     message: "Seu dia produtivo está chegando ao fim. Quer ver o resumo do seu desempenho?",
+                     actionLabel: "Ver Resumo",
+                     actionData: {
+                         type: "SHOW_SUMMARY",
+                         payload: summary
+                     }
+                 };
+             }
+        }
     }
 
     // 1. Verificação de BURNOUT

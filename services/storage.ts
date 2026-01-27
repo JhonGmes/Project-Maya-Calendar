@@ -1,5 +1,5 @@
 
-import { CalendarEvent, Task, UserProfile, IAMessage, Notification, ScoreHistory, Team, QuarterlyGoal, FocusSession } from '../types';
+import { CalendarEvent, Task, UserProfile, IAMessage, Notification, ScoreHistory, Team, QuarterlyGoal, FocusSession, WorkflowTemplate, WorkflowLog } from '../types';
 import { supabase } from './supabaseClient';
 
 const LOCAL_STORAGE_KEYS = {
@@ -12,7 +12,9 @@ const LOCAL_STORAGE_KEYS = {
   HISTORY: 'maya_score_history',
   TEAMS: 'maya_teams',
   GOALS: 'maya_quarter_goals',
-  FOCUS_SESSION: 'maya_focus_session' // Phase 4
+  FOCUS_SESSION: 'maya_focus_session',
+  WORKFLOW_TEMPLATES: 'maya_workflow_templates',
+  WORKFLOW_LOGS: 'maya_workflow_logs' // New
 };
 
 const defaultProfile: UserProfile = {
@@ -55,7 +57,8 @@ const mapSupabaseTask = (t: any): Task => ({
   dueDate: t.due_date ? new Date(t.due_date) : undefined,
   priority: t.priority as any,
   description: t.description,
-  teamId: t.team_id // Phase 23
+  teamId: t.team_id,
+  workflow: t.workflow_data // Assuming JSONB column for workflow
 });
 
 let isLocalMode = typeof window !== 'undefined' ? localStorage.getItem(LOCAL_STORAGE_KEYS.LOCAL_MODE) === 'true' : false;
@@ -171,7 +174,8 @@ export const StorageService = {
             priority: task.priority, 
             due_date: task.dueDate ? task.dueDate.toISOString() : null, 
             description: task.description,
-            team_id: task.teamId || null // Phase 23
+            team_id: task.teamId || null,
+            workflow_data: task.workflow || null // Save workflow JSONB
             };
             const { data, error } = await supabase.from('tasks').upsert(payload).select();
             if (!error && data) return mapSupabaseTask(data[0]);
@@ -187,6 +191,72 @@ export const StorageService = {
     const newTasks = index >= 0 ? [...tasks.slice(0, index), taskToSave, ...tasks.slice(index + 1)] : [...tasks, taskToSave];
     localStorage.setItem(LOCAL_STORAGE_KEYS.TASKS, JSON.stringify(newTasks));
     return taskToSave;
+  },
+
+  // Templates Persistence
+  getTemplates: async (): Promise<WorkflowTemplate[]> => {
+      // Local Only for now as we haven't created a table for it yet in Supabase
+      const data = localStorage.getItem(LOCAL_STORAGE_KEYS.WORKFLOW_TEMPLATES);
+      return data ? JSON.parse(data) : [];
+  },
+
+  saveTemplate: async (template: WorkflowTemplate): Promise<WorkflowTemplate> => {
+      const templates = await StorageService.getTemplates();
+      const newTemplates = [...templates, template];
+      localStorage.setItem(LOCAL_STORAGE_KEYS.WORKFLOW_TEMPLATES, JSON.stringify(newTemplates));
+      return template;
+  },
+
+  // --- WORKFLOW LOGS (NEW) ---
+  saveWorkflowLog: async (log: WorkflowLog): Promise<void> => {
+      if (!isLocalMode && supabase) {
+          try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) {
+                  await supabase.from('workflow_logs').insert({
+                      id: log.id || generateId(),
+                      workflow_id: log.workflowId,
+                      step_id: log.stepId,
+                      user_id: user.id,
+                      task_id: log.taskId,
+                      action: log.action,
+                      metadata: log.metadata,
+                      created_at: log.timestamp
+                  });
+              }
+          } catch(e) {
+              console.error("Failed to save workflow log to Supabase", e);
+          }
+      }
+      
+      // Local Backup
+      const current = localStorage.getItem(LOCAL_STORAGE_KEYS.WORKFLOW_LOGS);
+      const parsed = current ? JSON.parse(current) : [];
+      const updated = [log, ...parsed].slice(0, 100); // Keep last 100 locally
+      localStorage.setItem(LOCAL_STORAGE_KEYS.WORKFLOW_LOGS, JSON.stringify(updated));
+  },
+
+  getWorkflowLogs: async (): Promise<WorkflowLog[]> => {
+      if (!isLocalMode && supabase) {
+          try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) {
+                  const { data } = await supabase.from('workflow_logs').select('*').order('created_at', { ascending: false });
+                  if (data) return data.map(l => ({
+                      id: l.id,
+                      workflowId: l.workflow_id,
+                      stepId: l.step_id,
+                      userId: l.user_id,
+                      taskId: l.task_id,
+                      action: l.action,
+                      metadata: l.metadata,
+                      timestamp: l.created_at
+                  }));
+              }
+          } catch (e) {}
+      }
+      const data = localStorage.getItem(LOCAL_STORAGE_KEYS.WORKFLOW_LOGS);
+      return data ? JSON.parse(data) : [];
   },
 
   // Phase 23: Get Teams
@@ -355,7 +425,6 @@ export const StorageService = {
       }
   },
 
-  // Phase 26: Quarterly Goals
   saveQuarterlyGoal: async (title: string): Promise<void> => {
       if (!isLocalMode && supabase) {
          try {
@@ -378,7 +447,6 @@ export const StorageService = {
       localStorage.setItem(LOCAL_STORAGE_KEYS.GOALS, JSON.stringify(goals));
   },
   
-  // Phase 4: Focus Session
   getFocusSession: (): FocusSession => {
       const data = localStorage.getItem(LOCAL_STORAGE_KEYS.FOCUS_SESSION);
       return data ? JSON.parse(data) : { isActive: false, taskId: null, startTime: null, plannedDuration: 25 };

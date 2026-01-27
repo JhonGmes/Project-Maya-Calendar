@@ -1,14 +1,18 @@
 
 import React, { useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { calculateWeeklyStats, getProductiveHours } from '../utils/analytics';
-import { TrendingUp, CheckCircle, AlertTriangle, Clock, Activity, BarChart2 } from 'lucide-react';
+import { calculateWeeklyStats, getProductiveHours, calculateRealProductivityScore } from '../utils/analytics';
+import { TrendingUp, CheckCircle, AlertTriangle, Clock, Activity, BarChart2, Briefcase } from 'lucide-react';
 
 export const AnalyticsView: React.FC = () => {
-    const { tasks, scoreHistory, iaHistory, productivityScore } = useApp();
+    const { tasks, scoreHistory, iaHistory, productivityScore, workflowLogs } = useApp();
 
     const stats = useMemo(() => calculateWeeklyStats(tasks, scoreHistory, iaHistory), [tasks, scoreHistory, iaHistory]);
     const productiveHours = useMemo(() => getProductiveHours(tasks), [tasks]);
+    
+    // Filter tasks that are actually workflows
+    const workflowTasks = useMemo(() => tasks.filter(t => t.workflow), [tasks]);
+    const realScore = useMemo(() => calculateRealProductivityScore(workflowLogs, workflowTasks), [workflowLogs, workflowTasks]);
 
     // Simple helper to calculate max for chart scaling
     const maxTasks = Math.max(...stats.map(s => Math.max(s.completedTasks, s.postponedTasks)), 5);
@@ -20,17 +24,30 @@ export const AnalyticsView: React.FC = () => {
                 <p className="text-gray-500 dark:text-gray-400">Acompanhe seu desempenho, hábitos e equilíbrio.</p>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 {/* KPI Cards */}
                 <div className="bg-white/60 dark:bg-white/5 p-6 rounded-2xl border border-white/40 dark:border-white/5 shadow-sm">
                     <div className="flex items-center gap-3 mb-2">
                         <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full text-blue-600">
                             <Activity size={20} />
                         </div>
-                        <h4 className="font-bold text-gray-700 dark:text-gray-200">Score Atual</h4>
+                        <h4 className="font-bold text-gray-700 dark:text-gray-200">Score Diário</h4>
                     </div>
                     <p className="text-3xl font-bold text-custom-soil dark:text-white">{productivityScore}</p>
                     <p className="text-xs text-green-500 mt-1 flex items-center gap-1"><TrendingUp size={12} /> Manter acima de 80</p>
+                </div>
+
+                {/* NEW: Real Workflow Score */}
+                <div className="bg-white/60 dark:bg-white/5 p-6 rounded-2xl border border-purple-200 dark:border-purple-900/30 shadow-sm relative overflow-hidden">
+                    <div className="absolute -right-4 -top-4 bg-purple-500/10 w-24 h-24 rounded-full blur-2xl"></div>
+                    <div className="flex items-center gap-3 mb-2 relative z-10">
+                        <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-full text-purple-600">
+                            <Briefcase size={20} />
+                        </div>
+                        <h4 className="font-bold text-gray-700 dark:text-gray-200">Score de Entrega</h4>
+                    </div>
+                    <p className="text-3xl font-bold text-purple-700 dark:text-purple-300 relative z-10">{realScore}</p>
+                    <p className="text-xs text-gray-400 mt-1 relative z-10">Baseado em workflows reais</p>
                 </div>
 
                 <div className="bg-white/60 dark:bg-white/5 p-6 rounded-2xl border border-white/40 dark:border-white/5 shadow-sm">
@@ -51,12 +68,12 @@ export const AnalyticsView: React.FC = () => {
                         <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-full text-orange-600">
                             <AlertTriangle size={20} />
                         </div>
-                        <h4 className="font-bold text-gray-700 dark:text-gray-200">Adiamentos (Semana)</h4>
+                        <h4 className="font-bold text-gray-700 dark:text-gray-200">Adiamentos</h4>
                     </div>
                     <p className="text-3xl font-bold text-custom-soil dark:text-white">
                         {stats[stats.length - 1]?.postponedTasks || 0}
                     </p>
-                    <p className="text-xs text-gray-400 mt-1">Reagendamentos via IA</p>
+                    <p className="text-xs text-gray-400 mt-1">Nesta semana</p>
                 </div>
             </div>
 

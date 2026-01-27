@@ -17,6 +17,62 @@ export interface CalendarEvent {
 
 export type TaskPriority = 'high' | 'medium' | 'low';
 
+// --- TASK FLOW / WORKFLOW TYPES ---
+
+export type WorkflowStepStatus = 'locked' | 'available' | 'completed';
+
+export type WorkflowActionType = 
+  | { type: 'SEND_EMAIL'; payload: { to: string; template: string } }
+  | { type: 'NOTIFY_SECTOR'; payload: { sector: string; message: string } }
+  | { type: 'NONE' };
+
+export interface WorkflowStep {
+  id: string;
+  title: string;
+  description?: string;
+  order: number;
+  status: WorkflowStepStatus;
+  action?: WorkflowActionType;
+  assignedTo?: {
+      id: string;
+      name: string;
+      avatarUrl?: string;
+  };
+}
+
+export interface Workflow {
+  id: string;
+  title: string;
+  description?: string;
+  steps: WorkflowStep[];
+  status: 'pending' | 'in_progress' | 'completed';
+  createdAt: string;
+  totalSteps: number;
+  completedSteps: number;
+  ownerId?: string; // New: Owner identification
+}
+
+export interface WorkflowTemplate {
+    id: string;
+    title: string;
+    steps: {
+        title: string;
+        order: number;
+    }[];
+}
+
+// New: Workflow Audit Log
+export interface WorkflowLog {
+  id: string;
+  workflowId: string;
+  stepId: string;
+  userId: string; // Quem executou
+  taskId: string; // Vinculo com a tarefa pai
+  action: 'started' | 'completed';
+  timestamp: string;
+  metadata?: any;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -25,8 +81,9 @@ export interface Task {
   priority: TaskPriority;
   description?: string;
   teamId?: string;
-  assigneeId?: string; // Phase 7
-  estimatedTime?: number; // Estimated time in hours (default 1)
+  assigneeId?: string; 
+  estimatedTime?: number; 
+  workflow?: Workflow; 
 }
 
 // Phase 7: Roles
@@ -38,7 +95,7 @@ export interface UserProfile {
   email: string;
   avatarUrl?: string;
   phone?: string;
-  role?: string; // Legacy string, prefer using UserRole logic in App
+  role?: string; 
   bio?: string;
   workingHours: {
     start: string;
@@ -49,7 +106,6 @@ export interface UserProfile {
   defaultReminder: number;
 }
 
-// Phase 27: Company
 export interface Company {
     id: string;
     name: string;
@@ -59,7 +115,7 @@ export interface Team {
   id: string;
   name: string;
   ownerId: string;
-  companyId?: string; // Phase 27
+  companyId?: string; 
   members?: TeamMember[];
 }
 
@@ -76,7 +132,6 @@ export interface AppSettings {
   endHour: number;
 }
 
-// Phase 6: Analytics
 export type ViewMode = 'day' | 'week' | 'month' | 'tasks' | 'routine' | 'analytics';
 
 export interface IAMessage {
@@ -87,64 +142,112 @@ export interface IAMessage {
   content?: string;
 }
 
-// Phase 28: Suggestions
 export interface TimeSuggestion {
     start: string;
     end: string;
     reason: string;
 }
 
-// Phase 4: Focus Session
 export interface FocusSession {
     isActive: boolean;
     taskId: string | null;
-    startTime: string | null; // ISO String
-    plannedDuration: number; // minutes
+    startTime: string | null; 
+    plannedDuration: number; 
+    completedAt?: string; 
+    elapsedMinutes?: number;
 }
 
-// Phase 6: Weekly Stats
 export interface WeeklyStats {
-  weekLabel: string; // "Semana 12" or "10/05 - 17/05"
+  weekLabel: string;
   productivityScore: number;
   completedTasks: number;
   postponedTasks: number;
   burnoutLevel: "low" | "medium" | "high";
 }
 
-// --- FASE 2 & 3: IA COMO AGENTE DO SISTEMA ---
+// --- SCORE SYSTEM 2.0 ---
+export interface ScoreBreakdown {
+  focusPoints: number;      
+  taskPoints: number;       
+  consistencyBonus: number; 
+  penalties: number;        
+  total: number;
+  streakDays: number;
+  workflowPoints?: number; // New for Workflow Score
+}
 
-// Definição da mudança individual em uma reorganização
+export interface ProductivityScore {
+  date: string;
+  focusMinutes: number;
+  tasksCompleted: number;
+  score: number;
+  breakdown: ScoreBreakdown;
+}
+
+export interface DailySummary {
+  date: string;
+  focusSessions: number;
+  focusMinutes: number;
+  tasksCompleted: number;
+  score: number;
+  breakdown: ScoreBreakdown;
+  message: string;
+  suggestionForTomorrow: string;
+}
+
+export interface FocusSuggestion {
+  taskId: string;
+  title: string;
+  estimatedMinutes: number;
+  expectedScoreGain: number;
+}
+
+export type SystemDecision =
+  | { type: 'SUGGEST_FOCUS'; payload: FocusSuggestion }
+  | { type: 'SHOW_DAILY_SUMMARY'; payload: DailySummary }
+  | { type: 'EXPLAIN_SCORE' }
+  | { type: 'SUGGEST_NEXT_STEP'; payload: { workflowId: string; workflowTitle: string; step: WorkflowStep } }
+  | { type: 'NONE' };
+
+export interface IAContext {
+  hasActiveFocus: boolean;
+  focusDoneToday: boolean;
+  pendingTasks: Task[];
+  nextTask?: Task;
+  dailySummary?: DailySummary | null;
+  scoreBreakdown: ScoreBreakdown;
+}
+
 export interface TaskChange {
     taskId: string;
     taskTitle: string;
-    from: string; // ISO String
-    to: string;   // ISO String
+    from: string; 
+    to: string;   
 }
 
-// Phase 5: Negotiation Option
 export interface NegotiationOption {
     label: string;
     action: IAAction;
     style?: 'primary' | 'secondary' | 'outline';
 }
 
-// Definição estrita das ações que a IA pode solicitar
+// Updated IAAction to include Workflow Automation
 export type IAAction =
   | {
       type: "CREATE_TASK";
       payload: {
         title: string;
         priority?: TaskPriority;
-        dueDate?: string; // ISO String
-        assigneeId?: string; // Phase 7
+        dueDate?: string; 
+        assigneeId?: string;
       };
     }
   | {
       type: "CREATE_EVENT";
       payload: {
         title: string;
-        start: string; // ISO String
-        end?: string; // ISO String
+        start: string; 
+        end?: string; 
         category?: EventCategory;
         location?: string;
       };
@@ -154,7 +257,7 @@ export type IAAction =
       payload: {
         taskId?: string;
         taskIds?: string[];
-        newDate: string; // ISO String
+        newDate: string; 
       };
     }
   | {
@@ -185,7 +288,7 @@ export type IAAction =
       type: "ASK_CONFIRMATION";
       payload: {
         message: string;
-        action: IAAction; // Ação aninhada a ser executada após confirmação
+        action: IAAction; 
       };
     }
   | {
@@ -194,6 +297,18 @@ export type IAAction =
           taskTitle: string;
           reason: string;
           options: NegotiationOption[];
+      };
+    }
+  | {
+      type: "SHOW_SUMMARY"; 
+      payload: DailySummary;
+    }
+  | {
+      type: "COMPLETE_STEP"; // New: Automate Workflow Step
+      payload: {
+          taskId: string;
+          stepId: string;
+          workflowId: string;
       };
     }
   | {
@@ -206,19 +321,16 @@ export type IAAction =
       type: "NO_ACTION";
     };
 
-// Estrutura da resposta da IA vinda do Engine
 export interface IAResponse {
   message: string;
   actions: IAAction[];
 }
 
-// Estado de ação pendente para UI de confirmação
 export interface PendingActionState {
-  originalAction: IAAction; // Ação completa (ex: CREATE_TASK)
-  question: string;         // A pergunta feita pela IA
+  originalAction: IAAction; 
+  question: string;         
 }
 
-// Phase 3: Histórico de Ações
 export interface IAHistoryItem {
   timestamp: string;
   action: IAAction;
@@ -230,7 +342,6 @@ export interface BurnoutAnalysis {
     signals: string[];
 }
 
-// Phase 18
 export interface Notification {
   id: string;
   message: string;
@@ -238,30 +349,27 @@ export interface Notification {
   createdAt: Date;
 }
 
-// Phase 19
 export interface ScoreHistory {
   id: string;
   score: number;
   createdAt: Date;
 }
 
-// Phase 22
 export type PersonalityType = "disciplinado" | "sobrecarregado" | "neutro";
 
 export interface AgentSuggestion {
     id: string;
-    type: 'optimization' | 'warning' | 'pattern' | 'focus_coach';
+    type: 'optimization' | 'warning' | 'pattern' | 'focus_coach' | 'daily_summary' | 'workflow_step';
     message: string;
     actionLabel: string;
     actionData: IAAction;
 }
 
-// Phase 26
 export interface QuarterlyGoal {
     id: string;
     title: string;
     achieved: boolean;
     quarter: string;
-    metric?: string; // New field for smart goals
-    targetValue?: string; // New field for smart goals
+    metric?: string; 
+    targetValue?: string;
 }

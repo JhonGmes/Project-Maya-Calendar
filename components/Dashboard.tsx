@@ -1,9 +1,9 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { CalendarEvent, Task } from '../types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Clock, CheckCircle2, Circle, AlertCircle, Plus, Sparkles, Trophy, Target, ArrowRight, WifiOff, CloudCheck } from 'lucide-react';
+import { Clock, CheckCircle2, Circle, AlertCircle, Plus, Sparkles, Trophy, Target, WifiOff, CloudCheck, Flame, Zap, Brain, ArrowRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getScoreLevel } from '../utils/productivityScore';
 import { ProductivityChart } from './ProductivityChart';
@@ -18,15 +18,16 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClick, onAddTask, onToggleTask }) => {
-  const { productivityScore, scoreHistory, dailyFocus, setMayaOpen, addMessage, isSupabaseConnected, isAuthenticated } = useApp();
+  const { productivityScore, scoreBreakdown, scoreHistory, systemDecision, setMayaOpen, isSupabaseConnected, isAuthenticated, executeIAAction } = useApp();
+  const [showScoreDetails, setShowScoreDetails] = useState(false);
+
   const today = new Date();
   const todayEvents = events.filter(e => 
     new Date(e.start).toDateString() === today.toDateString()
   ).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
   const pendingTasks = tasks.filter(t => !t.completed).slice(0, 5);
-  const scoreLevel = getScoreLevel(productivityScore);
-
+  
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Bom dia';
@@ -34,13 +35,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
     return 'Boa noite';
   };
 
-  const startCoaching = () => {
-     setMayaOpen(true);
-     addMessage({
-         id: Date.now().toString(),
-         sender: 'maya',
-         text: `Ótima escolha! Vamos focar em "${dailyFocus?.title}". O que você precisa fazer primeiro para começar?`
-     });
+  const handleFocusSuggestion = () => {
+      if (systemDecision.type === 'SUGGEST_FOCUS') {
+          executeIAAction({
+              type: "START_FOCUS",
+              payload: {
+                  taskId: systemDecision.payload.taskId,
+                  duration: systemDecision.payload.estimatedMinutes
+              }
+          }, "user");
+      }
+  };
+  
+  const handleViewSummary = () => {
+      if (systemDecision.type === 'SHOW_DAILY_SUMMARY') {
+          executeIAAction({
+              type: "SHOW_SUMMARY",
+              payload: systemDecision.payload
+          }, "ai");
+      }
   };
 
   return (
@@ -52,12 +65,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
             <WifiOff className="text-red-500" size={20} />
             <div>
                 <h4 className="text-sm font-bold text-red-500">Supabase Desconectado</h4>
-                <p className="text-xs text-red-400">Não foi possível conectar ao banco de dados. Dados podem não ser salvos. Verifique o console.</p>
+                <p className="text-xs text-red-400">Não foi possível conectar ao banco de dados. Dados podem não ser salvos.</p>
             </div>
         </div>
       )}
 
-      <header className="mb-8 flex justify-between items-end">
+      {/* Daily Summary Banner (Triggered by Engine) */}
+      {systemDecision.type === 'SHOW_DAILY_SUMMARY' && (
+          <div className="mb-6 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl p-6 text-white shadow-lg animate-slide-up flex justify-between items-center cursor-pointer" onClick={handleViewSummary}>
+              <div>
+                  <h3 className="font-serif font-bold text-xl mb-1">Dia finalizado?</h3>
+                  <p className="opacity-90 text-sm">{systemDecision.payload.message}</p>
+              </div>
+              <div className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition-colors">
+                  <ArrowRight size={20} />
+              </div>
+          </div>
+      )}
+
+      <header className="mb-8 flex justify-between items-end relative">
         <div>
             <h2 className="text-4xl font-serif font-bold text-custom-soil dark:text-white mb-2 animate-slide-up">
             {getGreeting()}, <span className="opacity-60">Usuário</span>
@@ -74,25 +100,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
             </div>
         </div>
         
-        {/* Productivity Score Card */}
-        <div className="hidden md:flex flex-col items-end gap-2 animate-slide-up">
-            <div className="flex items-center gap-3 bg-white/60 dark:bg-white/5 backdrop-blur px-4 py-2 rounded-2xl border border-white/50 dark:border-white/10 shadow-sm">
+        {/* Score Card 2.0 (Explainable) */}
+        <div className="hidden md:block animate-slide-up relative">
+            <button 
+                onClick={() => setShowScoreDetails(!showScoreDetails)}
+                className="flex items-center gap-3 bg-white/60 dark:bg-white/5 backdrop-blur px-4 py-2 rounded-2xl border border-white/50 dark:border-white/10 shadow-sm hover:bg-white/80 transition-all cursor-pointer"
+            >
                 <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-full text-yellow-600 dark:text-yellow-400">
                     <Trophy size={20} />
                 </div>
-                <div>
+                <div className="text-right">
                     <p className="text-[10px] uppercase text-gray-500 font-bold tracking-wider">Produtividade</p>
-                    <div className="flex items-baseline gap-1">
+                    <div className="flex items-baseline justify-end gap-1">
                         <span className="text-xl font-bold text-custom-soil dark:text-white">{productivityScore}</span>
-                        <span className="text-xs text-gray-400 font-medium">pts ({scoreLevel})</span>
+                        <span className="text-xs text-gray-400 font-medium">pts</span>
                     </div>
                 </div>
-            </div>
+            </button>
+
+            {/* Score Breakdown Popover */}
+            {showScoreDetails && (
+                <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-zinc-800 rounded-2xl shadow-xl border border-gray-100 dark:border-white/5 p-4 z-50 animate-fade-in">
+                    <h4 className="text-sm font-bold text-gray-700 dark:text-white mb-3 flex items-center gap-2">
+                        <Target size={14} /> Detalhamento do Score
+                    </h4>
+                    <div className="space-y-2">
+                        <div className="flex justify-between text-xs">
+                            <span className="text-gray-500 flex items-center gap-1"><Brain size={10} /> Foco Ativo</span>
+                            <span className="font-bold text-green-600">+{scoreBreakdown.focusPoints}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                            <span className="text-gray-500 flex items-center gap-1"><CheckCircle2 size={10} /> Tarefas</span>
+                            <span className="font-bold text-green-600">+{scoreBreakdown.taskPoints}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                            <span className="text-gray-500 flex items-center gap-1"><Flame size={10} /> Consistência</span>
+                            <span className="font-bold text-orange-500">+{scoreBreakdown.consistencyBonus}</span>
+                        </div>
+                         <div className="flex justify-between text-xs pt-2 border-t border-gray-100 dark:border-white/5">
+                            <span className="text-gray-500 flex items-center gap-1"><AlertCircle size={10} /> Penalidades</span>
+                            <span className="font-bold text-red-500">-{scoreBreakdown.penalties}</span>
+                        </div>
+                    </div>
+                    <div className="mt-3 pt-2 border-t border-gray-100 dark:border-white/5 text-center">
+                         <p className="text-[10px] text-gray-400">Sequência atual: {scoreBreakdown.streakDays} dias</p>
+                    </div>
+                </div>
+            )}
         </div>
       </header>
 
-      {/* Phase 20: Daily Focus Card */}
-      {dailyFocus && !dailyFocus.completed && (
+      {/* SMART FOCUS CARD (Controlled by Engine) */}
+      {systemDecision.type === 'SUGGEST_FOCUS' && (
           <div className="mb-8 p-1 rounded-3xl bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 animate-slide-up">
              <div className="bg-white dark:bg-zinc-900 rounded-[22px] p-6 flex flex-col md:flex-row justify-between items-center gap-4">
                  <div className="flex items-center gap-4">
@@ -100,15 +159,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ events, tasks, onEventClic
                          <Target size={24} />
                      </div>
                      <div>
-                         <h3 className="text-sm font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">Modo Foco Diário</h3>
-                         <p className="text-xl font-medium dark:text-white">{dailyFocus.title}</p>
+                         <div className="flex items-center gap-2 mb-1">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">Modo Foco Sugerido</h3>
+                            <span className="text-[10px] px-2 py-0.5 bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 rounded-full font-bold flex items-center gap-1">
+                                <Clock size={10} /> Est. {systemDecision.payload.estimatedMinutes} min
+                            </span>
+                         </div>
+                         <p className="text-xl font-medium dark:text-white">{systemDecision.payload.title}</p>
+                         <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                             <Zap size={10} className="text-yellow-500" /> Impacto no Score: <span className="text-yellow-600 font-bold">+{systemDecision.payload.expectedScoreGain} pts</span>
+                         </p>
                      </div>
                  </div>
                  <button 
-                    onClick={startCoaching}
+                    onClick={handleFocusSuggestion}
                     className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold transition-all shadow-lg hover:shadow-purple-500/30"
                  >
-                     <Sparkles size={16} /> Focar Agora <ArrowRight size={16} />
+                     <Sparkles size={16} /> Focar Agora
                  </button>
              </div>
           </div>

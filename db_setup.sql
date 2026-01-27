@@ -68,6 +68,7 @@ create table if not exists public.tasks (
   due_date timestamp with time zone,
   priority text,
   description text,
+  workflow_data jsonb, -- Armazena a estrutura completa do workflow
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -99,6 +100,18 @@ create table if not exists public.quarterly_goals (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
+-- 10. Logs de Workflow (Auditoria e Métricas)
+create table if not exists public.workflow_logs (
+  id uuid primary key default uuid_generate_v4(),
+  workflow_id text not null, -- ID dentro do JSONB da task ou ID externo
+  step_id text not null,
+  user_id uuid references auth.users not null,
+  task_id uuid references public.tasks(id) on delete cascade,
+  action text not null, -- 'started', 'completed'
+  metadata jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
 -- Habilitar Segurança (RLS) - Seguro rodar várias vezes
 alter table public.profiles enable row level security;
 alter table public.events enable row level security;
@@ -109,6 +122,7 @@ alter table public.teams enable row level security;
 alter table public.team_members enable row level security;
 alter table public.companies enable row level security;
 alter table public.quarterly_goals enable row level security;
+alter table public.workflow_logs enable row level security;
 
 -- Limpar policies antigas para recriar (evita erro "policy already exists")
 drop policy if exists "Users can see own profile" on public.profiles;
@@ -128,6 +142,8 @@ drop policy if exists "Users can insert own history" on public.productivity_hist
 drop policy if exists "Users can see teams they belong to" on public.teams;
 drop policy if exists "Users can see own goals" on public.quarterly_goals;
 drop policy if exists "Users can insert own goals" on public.quarterly_goals;
+drop policy if exists "Users can see related workflow logs" on public.workflow_logs;
+drop policy if exists "Users can insert workflow logs" on public.workflow_logs;
 
 -- Recriar Policies
 
@@ -166,3 +182,10 @@ create policy "Users can see teams they belong to" on public.teams for select us
 -- Goals
 create policy "Users can see own goals" on public.quarterly_goals for select using (auth.uid() = user_id);
 create policy "Users can insert own goals" on public.quarterly_goals for insert with check (auth.uid() = user_id);
+
+-- Workflow Logs
+create policy "Users can see related workflow logs" on public.workflow_logs for select using (
+  user_id = auth.uid() OR
+  task_id IN (select id from public.tasks where team_id IN (select team_id from public.team_members where user_id = auth.uid()))
+);
+create policy "Users can insert workflow logs" on public.workflow_logs for insert with check (auth.uid() = user_id);

@@ -1,19 +1,21 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction, IAHistoryItem, FocusSession, UserRole } from "../types";
+import { Task, CalendarEvent, UserProfile, ViewMode, PendingActionState, IAMessage, Notification, ScoreHistory, Team, PersonalityType, AgentSuggestion, IAAction, IAHistoryItem, FocusSession, UserRole, ScoreBreakdown, SystemDecision, ProductivityScore, WorkflowTemplate, Workflow, WorkflowLog } from "../types";
 import { StorageService } from "../services/storage";
 import { supabase } from "../services/supabaseClient";
 import { calculatePriority, sortTasksByDeadline } from "../utils/taskUtils";
 import { ToastMessage } from "../components/Toast";
-import { calculateScore } from "../utils/productivityScore";
-import { getUrgentTasks } from "../utils/deadlineWatcher";
+import { calculateProductivityScore, calculateScoreBreakdown } from "../utils/productivityScore";
 import { getDailyFocus } from "../utils/dailyFocus";
 import { detectPersonality } from "../utils/personalityEngine"; 
 import { generateWeeklyReport } from "../utils/weeklyReport"; 
 import { useAuth } from "./AuthContext";
-import { observeState } from "../utils/agentObserver";
 import { getNextTaskSuggestion } from "../utils/taskAnalyzer";
 import { generateReorganizationPlan } from "../utils/weekReorganizer"; 
+import { IAActionEngine } from "../utils/decisionEngine";
+import { generateDailySummary } from "../utils/dailySummary";
+import { isToday, getHours } from "date-fns";
+import { WorkflowEngine } from "../utils/workflowEngine";
 
 type Screen = ViewMode | "login" | "settings";
 
@@ -37,8 +39,14 @@ export interface AppContextData {
   addToast: (toast: ToastMessage) => void;
 
   // Data
-  tasks: Task[]; // Now filtered by current Team
+  tasks: Task[];
   addTask: (title: string, dueDate?: Date) => Promise<void>; 
+  addWorkflow: (title: string, steps: string[]) => Promise<void>; 
+  saveWorkflowAsTemplate: (workflow: Workflow) => Promise<void>; 
+  createWorkflowFromTemplate: (template: WorkflowTemplate) => Promise<void>; 
+  advanceWorkflow: (task: Task, stepId: string) => Promise<void>; // New: Logged Workflow Advance
+  templates: WorkflowTemplate[]; 
+  workflowLogs: WorkflowLog[]; // New: Exposed for analytics
   updateTask: (task: Task) => Promise<void>;
   events: CalendarEvent[];
   addEvent: (event: Partial<CalendarEvent>) => Promise<void>;
@@ -47,10 +55,10 @@ export interface AppContextData {
   profile: UserProfile | null;
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
 
-  // Teams (Phase 7)
+  // Teams
   teams: Team[];
   currentTeam: Team | null;
-  userRole: UserRole; // Current role in the active context
+  userRole: UserRole;
   switchTeam: (teamId: string | null) => Promise<void>;
 
   // AI State
@@ -66,8 +74,12 @@ export interface AppContextData {
   setAgentSuggestion: (suggestion: AgentSuggestion | null) => void;
   personality: PersonalityType;
   
+  // System Decision Engine
+  systemDecision: SystemDecision;
+
   // Productivity
   productivityScore: number;
+  scoreBreakdown: ScoreBreakdown;
   scoreHistory: ScoreHistory[];
   dailyFocus: Task | null;
   focusSession: FocusSession;
@@ -98,14 +110,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Data State
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [allTasks, setAllTasks] = useState<Task[]>([]); // Raw store of all tasks
-  const [tasks, setTasks] = useState<Task[]>([]); // Filtered for view
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [workflowLogs, setWorkflowLogs] = useState<WorkflowLog[]>([]);
+  
+  // Score State
   const [productivityScore, setProductivityScore] = useState(0);
+  const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown>({ focusPoints: 0, taskPoints: 0, consistencyBonus: 0, penalties: 0, total: 0, streakDays: 0 });
   const [scoreHistory, setScoreHistory] = useState<ScoreHistory[]>([]);
+  
   const [dailyFocus, setDailyFocus] = useState<Task | null>(null);
 
-  // Teams State (Phase 7)
+  // Teams State
   const [teams, setTeams] = useState<Team[]>([]);
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('member');
@@ -121,6 +139,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [iaHistory, setIaHistory] = useState<IAHistoryItem[]>([]);
   const [personality, setPersonality] = useState<PersonalityType>("neutro");
   const [focusSession, setFocusSession] = useState<FocusSession>({ isActive: false, taskId: null, startTime: null, plannedDuration: 25 });
+  const [systemDecision, setSystemDecision] = useState<SystemDecision>({ type: 'NONE' });
 
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(true);
 
@@ -128,13 +147,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [loadedTasks, loadedEvents, loadedProfile, loadedHistory, loadedTeams, loadedNotifs] = await Promise.all([
-            StorageService.getTasks(), // Fetches ALL user tasks initially
+        const [loadedTasks, loadedEvents, loadedProfile, loadedHistory, loadedTeams, loadedNotifs, loadedTemplates, loadedLogs] = await Promise.all([
+            StorageService.getTasks(),
             StorageService.getEvents(),
             StorageService.getProfile(),
             StorageService.getHistory(),
             StorageService.getTeams(),
-            StorageService.getNotifications()
+            StorageService.getNotifications(),
+            StorageService.getTemplates(),
+            StorageService.getWorkflowLogs()
         ]);
         setAllTasks(loadedTasks);
         setEvents(loadedEvents);
@@ -142,23 +163,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setScoreHistory(loadedHistory);
         setTeams(loadedTeams);
         setNotifications(loadedNotifs);
+        setTemplates(loadedTemplates);
+        setWorkflowLogs(loadedLogs);
         
-        // Default to personal view (no team selected)
         const personalTasks = loadedTasks.filter(t => !t.teamId);
         setTasks(sortTasksByDeadline(personalTasks));
 
-        // Load AI History
         const storedHistory = localStorage.getItem('maya_ia_history');
         if (storedHistory) {
             const parsedHistory = JSON.parse(storedHistory);
             setIaHistory(parsedHistory);
-            const initialScore = calculateScore(personalTasks, parsedHistory);
-            setProductivityScore(initialScore);
-        } else {
-            setProductivityScore(calculateScore(personalTasks, []));
+            const scoreDates = loadedHistory.map(h => new Date(h.createdAt));
+            const fullScore = calculateProductivityScore(personalTasks, parsedHistory, scoreDates);
+            setProductivityScore(fullScore.score);
+            setScoreBreakdown(fullScore.breakdown);
         }
 
-        // Load Focus Session
         const storedSession = StorageService.getFocusSession();
         setFocusSession(storedSession);
         
@@ -178,46 +198,95 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [user, isLocalMode]);
 
-  // --- 2. Switch Team Logic (Phase 7) ---
+  // --- 2. IA ACTION ENGINE LOOP ---
+  useEffect(() => {
+      if (tasks.length === 0) return;
+
+      const scoreDates = scoreHistory.map(h => new Date(h.createdAt));
+      const focusDoneToday = iaHistory.some(h => 
+          h.action.type === 'END_FOCUS' && isToday(new Date(h.timestamp))
+      );
+      
+      let dailySummary = null;
+      if (getHours(new Date()) >= 17) {
+           dailySummary = generateDailySummary(tasks, iaHistory, scoreDates);
+      }
+      
+      const nextTask = tasks.filter(t => !t.completed).sort((a,b) => calculatePriority(a) === 'high' ? -1 : 1)[0];
+
+      // Run Decision Engine
+      const decision = IAActionEngine.decide({
+          hasActiveFocus: focusSession.isActive,
+          focusDoneToday,
+          pendingTasks: tasks.filter(t => !t.completed),
+          nextTask,
+          dailySummary,
+          scoreBreakdown
+      });
+
+      setSystemDecision(decision);
+
+      if (decision.type === 'SUGGEST_NEXT_STEP') {
+          const recentSuggestion = iaHistory.slice(-5).find(h => 
+              h.action.type === 'NO_ACTION' && 
+              Date.now() - new Date(h.timestamp).getTime() < 10 * 60 * 1000
+          );
+          
+          if (!recentSuggestion && !agentSuggestion) {
+               setAgentSuggestion({
+                   id: `next-step-${decision.payload.step.id}`,
+                   type: 'workflow_step',
+                   message: `Próximo passo no fluxo "${decision.payload.workflowTitle}": \n👉 ${decision.payload.step.title}.`,
+                   actionLabel: 'Executar Agora',
+                   actionData: {
+                       type: "COMPLETE_STEP",
+                       payload: {
+                           taskId: tasks.find(t => t.workflow?.id === decision.payload.workflowId)?.id!,
+                           stepId: decision.payload.step.id,
+                           workflowId: decision.payload.workflowId
+                       }
+                   }
+               });
+          }
+      }
+
+  }, [tasks, iaHistory, focusSession, scoreBreakdown]);
+
+  // Switch Team Logic
   const switchTeam = async (teamId: string | null) => {
-      // 1. Update State
       const selected = teams.find(t => t.id === teamId) || null;
       setCurrentTeam(selected);
       
-      // 2. Determine Role (Mocked logic for now, usually comes from Team Member table)
       if (selected) {
-         // In a real app, check 'teams_members' table. 
-         // For demo, if ownerId matches user.id, they are admin/manager.
          setUserRole(selected.ownerId === user?.id ? 'manager' : 'member');
       } else {
-         setUserRole('member'); // Personal mode default
+         setUserRole('member');
       }
 
-      // 3. Filter Tasks
       const filtered = teamId 
         ? allTasks.filter(t => t.teamId === teamId)
         : allTasks.filter(t => !t.teamId);
       
       setTasks(sortTasksByDeadline(filtered));
-
-      // 4. Reset Context Dependent items
       setDailyFocus(getDailyFocus(filtered));
-      setPersonality(detectPersonality(filtered));
-      setProductivityScore(calculateScore(filtered, iaHistory));
       
       addToast({ 
           id: Date.now().toString(), 
           title: "Mudança de Contexto", 
-          message: selected ? `Equipe: ${selected.name} (${selected.ownerId === user?.id ? 'Gestor' : 'Membro'})` : "Modo Pessoal", 
+          message: selected ? `Equipe: ${selected.name}` : "Modo Pessoal", 
           type: "info" 
       });
   };
 
-  // --- 3. Persist AI History & Update Score ---
+  // --- Persist History ---
   useEffect(() => {
       if (iaHistory.length > 0) {
           localStorage.setItem('maya_ia_history', JSON.stringify(iaHistory.slice(-50))); 
-          setProductivityScore(calculateScore(tasks, iaHistory));
+          
+          const scoreDates = scoreHistory.map(h => new Date(h.createdAt));
+          const fullScore = calculateProductivityScore(tasks, iaHistory, scoreDates);
+          setProductivityScore(fullScore.score);
+          setScoreBreakdown(fullScore.breakdown);
       }
   }, [iaHistory, tasks]);
 
@@ -225,31 +294,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       StorageService.saveFocusSession(focusSession);
   }, [focusSession]);
 
-  // --- 4. Observer & Suggestion Loop ---
-  useEffect(() => {
-    if (tasks.length === 0) return;
-    
-    const existingSuggestion = observeState(tasks, iaHistory, productivityScore, focusSession);
-    
-    if (existingSuggestion && existingSuggestion.id === 'burnout_alert' && existingSuggestion.actionData.type === 'ASK_CONFIRMATION') {
-        const plan = generateReorganizationPlan(tasks);
-        if (existingSuggestion.actionData.payload.action.type === 'REORGANIZE_WEEK') {
-             existingSuggestion.actionData.payload.action.payload = plan;
-        }
-    }
-
-    const proactiveSuggestion = getNextTaskSuggestion(tasks);
-
-    if (existingSuggestion) {
-        if (existingSuggestion.type === 'focus_coach') {
-             setAgentSuggestion(existingSuggestion);
-        } else if (!agentSuggestion) {
-             setAgentSuggestion(existingSuggestion);
-        }
-    } else if (proactiveSuggestion && !agentSuggestion && !focusSession.isActive) {
-        setAgentSuggestion(proactiveSuggestion);
-    }
-  }, [tasks, iaHistory, productivityScore, focusSession]); 
 
   // --- ACTIONS ---
 
@@ -274,17 +318,82 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           completed: false,
           priority: 'medium', 
           dueDate: dueDate || new Date(),
-          teamId: currentTeam?.id // Assign to current team context
+          teamId: currentTeam?.id
       };
       newTask.priority = calculatePriority(newTask);
-      
       const saved = await StorageService.saveTask(newTask);
-      
-      // Update global store and filtered view
       setAllTasks(prev => [...prev, saved]);
       setTasks(prev => sortTasksByDeadline([...prev, saved]));
-      
       addToast({ id: Date.now().toString(), title: "Sucesso", message: "Tarefa criada.", type: "success" });
+  };
+
+  const addWorkflow = async (title: string, steps: string[]) => {
+    if (!user && !isLocalMode) return;
+    const stepsData = steps.map(s => ({ title: s }));
+    const workflow = WorkflowEngine.createTemplate(title, stepsData);
+    workflow.ownerId = user?.id; // Assign owner
+
+    const newTask: Task = {
+        id: StorageService.generateId(),
+        title: title,
+        completed: false,
+        priority: 'medium',
+        dueDate: new Date(),
+        workflow: workflow, 
+        teamId: currentTeam?.id
+    };
+    
+    const saved = await StorageService.saveTask(newTask);
+    setAllTasks(prev => [...prev, saved]);
+    setTasks(prev => sortTasksByDeadline([...prev, saved]));
+    
+    addToast({ id: Date.now().toString(), title: "Fluxo Criado", message: "Novo processo iniciado.", type: "success" });
+  };
+
+  // Safe Workflow Advance with Logging
+  const advanceWorkflow = async (task: Task, stepId: string) => {
+      if (!task.workflow) return;
+
+      // 1. Logic Update
+      const updatedWorkflow = WorkflowEngine.completeStep(task.workflow, stepId);
+      
+      const updatedTask = {
+          ...task,
+          workflow: updatedWorkflow,
+          completed: updatedWorkflow.status === 'completed'
+      };
+
+      // 2. Database Update
+      await updateTask(updatedTask);
+
+      // 3. Audit Log (Side Effect)
+      const logEntry: WorkflowLog = {
+          id: StorageService.generateId(),
+          workflowId: updatedWorkflow.id,
+          stepId: stepId,
+          taskId: task.id,
+          userId: user?.id || 'local-user',
+          action: 'completed',
+          timestamp: new Date().toISOString()
+      };
+      
+      await StorageService.saveWorkflowLog(logEntry);
+      setWorkflowLogs(prev => [logEntry, ...prev]);
+  };
+
+  const saveWorkflowAsTemplate = async (workflow: Workflow) => {
+     const template: WorkflowTemplate = {
+         id: StorageService.generateId(),
+         title: workflow.title,
+         steps: workflow.steps.map(s => ({ title: s.title, order: s.order }))
+     };
+     await StorageService.saveTemplate(template);
+     setTemplates(prev => [...prev, template]);
+     addToast({ id: Date.now().toString(), title: "Template Salvo", message: "Fluxo salvo para reuso.", type: "success" });
+  };
+
+  const createWorkflowFromTemplate = async (template: WorkflowTemplate) => {
+      await addWorkflow(template.title, template.steps.sort((a,b) => a.order - b.order).map(s => s.title));
   };
 
   const updateTask = async (task: Task) => {
@@ -312,7 +421,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
       await StorageService.saveEvent(newEvent);
       setEvents(prev => [...prev, newEvent]);
-      addToast({ id: Date.now().toString(), title: "Sucesso", message: "Evento agendado.", type: "success" });
   };
 
   const addMessage = (message: IAMessage) => {
@@ -343,8 +451,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           startTime: new Date().toISOString(),
           plannedDuration: duration
       });
+      setIaHistory(prev => [
+          ...prev, 
+          { timestamp: new Date().toISOString(), action: { type: "START_FOCUS", payload: { taskId, duration } }, source: "user" }
+      ]);
       addToast({ id: Date.now().toString(), title: "Modo Foco Ativado", message: "Boa concentração!", type: "info" });
-      setMayaOpen(false); // Close modal to show focus overlay
+      setMayaOpen(false); 
   };
 
   const endFocusSession = async (completed: boolean) => {
@@ -352,17 +464,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const task = tasks.find(t => t.id === focusSession.taskId);
           if (task) {
               await updateTask({ ...task, completed: true });
-              setIaHistory(prev => [...prev, { timestamp: new Date().toISOString(), action: { type: "END_FOCUS", payload: { completed: true } }, source: "user" }]);
           }
       }
+      setIaHistory(prev => [
+          ...prev, 
+          { timestamp: new Date().toISOString(), action: { type: "END_FOCUS", payload: { completed } }, source: "user" }
+      ]);
       setFocusSession({ isActive: false, taskId: null, startTime: null, plannedDuration: 25 });
   };
 
-  // --- CORE DISPATCHER FOR AI ACTIONS ---
   const executeIAAction = async (action: IAAction, source: "user" | "ai" = "ai") => {
-    console.log(`🤖 Executing Action [${source}]:`, action);
-    
-    if (action.type !== 'NEGOTIATE_DEADLINE' && action.type !== 'ASK_CONFIRMATION') {
+    if (action.type !== 'NEGOTIATE_DEADLINE' && action.type !== 'ASK_CONFIRMATION' && action.type !== 'SHOW_SUMMARY') {
         setIaHistory(prev => [
             ...prev, 
             { timestamp: new Date().toISOString(), action, source }
@@ -373,7 +485,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         case "CREATE_TASK":
             await addTask(action.payload.title, action.payload.dueDate ? new Date(action.payload.dueDate) : undefined);
             break;
-
         case "CREATE_EVENT":
             await addEvent({
                 title: action.payload.title,
@@ -383,78 +494,59 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 location: action.payload.location
             });
             break;
-
         case "RESCHEDULE_TASK":
              const { taskId, taskIds, newDate } = action.payload;
              const ids = taskIds || (taskId ? [taskId] : []);
-             let count = 0;
              for (const id of ids) {
                  const t = tasks.find(x => x.id === id);
-                 if (t) {
-                     await updateTask({ ...t, dueDate: new Date(newDate) });
-                     count++;
-                 }
-             }
-             if (count > 0) {
-                 addToast({ id: Date.now().toString(), title: "Reagendado", message: `${count} tarefa(s) atualizada(s) para ${new Date(newDate).toLocaleString()}`, type: "info" });
+                 if (t) await updateTask({ ...t, dueDate: new Date(newDate) });
              }
              break;
-        
         case "REORGANIZE_WEEK":
             const changes = action.payload.changes;
-            let changesCount = 0;
             if (changes) {
                 for (const change of changes) {
                     const task = tasks.find(t => t.id === change.taskId);
-                    if (task) {
-                        await updateTask({ ...task, dueDate: new Date(change.to) });
-                        changesCount++;
-                    }
+                    if (task) await updateTask({ ...task, dueDate: new Date(change.to) });
                 }
-            }
-            if (changesCount > 0) {
-                addToast({ 
-                    id: Date.now().toString(), 
-                    title: "Semana Reorganizada", 
-                    message: `${changesCount} tarefas redistribuídas para equilibrar sua carga.`, 
-                    type: "success" 
-                });
+                addToast({ id: Date.now().toString(), title: "Reorganizado", message: "Semana ajustada com sucesso.", type: "success" });
             }
             break;
-
+        case "COMPLETE_STEP": // AI Automation
+             const { taskId: tId, stepId } = action.payload;
+             const targetTask = tasks.find(t => t.id === tId);
+             if (targetTask) {
+                 await advanceWorkflow(targetTask, stepId);
+                 addToast({ id: Date.now().toString(), title: "Etapa Concluída", message: "Avanço registrado via IA.", type: "success" });
+             }
+             break;
         case "CHANGE_SCREEN":
              setScreen(action.payload);
              break;
-
         case "START_FOCUS":
              startFocusSession(action.payload.taskId, action.payload.duration);
              break;
-
         case "END_FOCUS":
              endFocusSession(action.payload.completed);
              break;
-
         case "ASK_CONFIRMATION":
-             setPendingAction({
-                 originalAction: action.payload.action,
-                 question: action.payload.message
-             });
+             setPendingAction({ originalAction: action.payload.action, question: action.payload.message });
              break;
-        
         case "NEGOTIATE_DEADLINE":
-             setPendingAction({
-                 originalAction: action,
-                 question: "Negociação de Prazo" 
-             });
+             setPendingAction({ originalAction: action, question: "Negociação de Prazo" });
              break;
-
+        case "SHOW_SUMMARY":
+             addMessage({ 
+                 id: Date.now().toString(), 
+                 sender: 'maya', 
+                 text: `📊 **Resumo do Dia**\nScore: ${action.payload.score}\n\n${action.payload.message}`
+             });
+             setMayaOpen(true);
+             break;
         case "REPLY":
              addMessage({ id: Date.now().toString(), sender: 'maya', text: action.payload.message });
              break;
-
-        case "NO_ACTION":
-        default:
-             break;
+        default: break;
     }
   };
 
@@ -468,6 +560,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         toasts, addToast,
         profile, updateProfile,
         tasks, addTask, updateTask,
+        addWorkflow,
+        saveWorkflowAsTemplate,
+        createWorkflowFromTemplate,
+        advanceWorkflow,
+        templates,
+        workflowLogs,
         events, addEvent,
         iaStatus, setIaStatus,
         messages, addMessage,
@@ -475,15 +573,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         executeIAAction,
         iaHistory,
         agentSuggestion, setAgentSuggestion,
-        productivityScore, scoreHistory, dailyFocus,
+        productivityScore, scoreBreakdown, scoreHistory, dailyFocus,
         notifications, unreadNotifications: notifications.filter(n => !n.read).length,
         markNotificationAsRead,
         clearAllNotifications,
-        teams, currentTeam, switchTeam, userRole, // Phase 7
+        teams, currentTeam, switchTeam, userRole, 
         personality,
         generateReport,
         isSupabaseConnected,
-        focusSession, endFocusSession
+        focusSession, endFocusSession,
+        systemDecision 
       }}
     >
       {children}

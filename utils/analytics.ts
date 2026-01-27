@@ -1,6 +1,6 @@
 
-import { WeeklyStats, Task, ScoreHistory, IAHistoryItem } from '../types';
-import { startOfWeek, endOfWeek, format, isWithinInterval, subWeeks } from 'date-fns';
+import { WeeklyStats, Task, ScoreHistory, IAHistoryItem, WorkflowLog } from '../types';
+import { startOfWeek, endOfWeek, format, isWithinInterval, subWeeks, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export function calculateWeeklyStats(
@@ -25,9 +25,6 @@ export function calculateWeeklyStats(
             : (i === 0 ? 50 : stats[stats.length-1]?.productivityScore || 50); // Fallback
 
         // 2. Completed Tasks
-        // Note: In a real app, we'd check 'completedAt'. Here we approximate with history or current state if completed.
-        // For accurate historical data, we'd need a 'completedAt' field on Task. 
-        // We will infer from IAHistory END_FOCUS or NO_ACTION completions if available, or just mock slightly based on current data distribution
         const completedCount = tasks.filter(t => t.completed && t.dueDate && isWithinInterval(new Date(t.dueDate), { start: weekStart, end: weekEnd })).length;
 
         // 3. Postponed Tasks (from IAHistory)
@@ -64,4 +61,53 @@ export function getProductiveHours(tasks: Task[]): { hour: number, count: number
     return Object.entries(hours)
         .map(([h, c]) => ({ hour: parseInt(h), count: c }))
         .sort((a,b) => a.hour - b.hour);
+}
+
+// NEW: Real Workflow-based Score Logic
+export function calculateRealProductivityScore(
+    logs: WorkflowLog[], 
+    workflows: Task[] // Tasks containing workflows
+): number {
+    
+    // Filtros: Ações dos últimos 30 dias para relevância
+    const now = new Date();
+    const recentLogs = logs.filter(l => {
+        const logDate = new Date(l.timestamp);
+        return (now.getTime() - logDate.getTime()) < (30 * 24 * 60 * 60 * 1000);
+    });
+
+    if (recentLogs.length === 0) return 50; // Base score
+
+    let score = 50;
+
+    // 1. Etapas Concluídas (Peso 10)
+    const completedSteps = recentLogs.filter(l => l.action === 'completed').length;
+    score += (completedSteps * 10);
+
+    // 2. Atrasos (Peso -5)
+    // Precisamos cruzar com a data de 'completed' vs 'dueDate' da Task pai
+    // Como simplificação, se a task pai estiver 'late' no momento da conclusão do step
+    let lateSteps = 0;
+    recentLogs.forEach(log => {
+        if (log.action === 'completed') {
+            const task = workflows.find(t => t.id === log.taskId);
+            if (task && task.dueDate) {
+                const completedAt = new Date(log.timestamp);
+                const dueAt = new Date(task.dueDate);
+                // Se completou depois do prazo (margem de 1h)
+                if (completedAt.getTime() > dueAt.getTime() + 3600000) {
+                    lateSteps++;
+                }
+            }
+        }
+    });
+    score -= (lateSteps * 5);
+
+    // 3. Workflows Finalizados (Peso 20)
+    // Um workflow é finalizado quando a tarefa pai é marcada como completed
+    const finishedWorkflows = workflows.filter(t => t.workflow && t.completed).length;
+    score += (finishedWorkflows * 20);
+
+    // Normalização (0-100)
+    return Math.min(100, Math.max(0, score));
 }

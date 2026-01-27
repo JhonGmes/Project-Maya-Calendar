@@ -1,9 +1,13 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Task } from '../types';
-import { CheckCircle2, Circle, Plus, AlertCircle, Sparkles } from 'lucide-react';
+import { CheckCircle2, Circle, Plus, AlertCircle, Sparkles, Workflow, Layers } from 'lucide-react';
 import { suggestNextTask } from '../utils/iaSuggestions';
 import { calculatePriority } from '../utils/taskUtils';
+import { WorkflowCard } from './WorkflowCard';
+import { useApp } from '../context/AppContext';
+import { WorkflowEngine } from '../utils/workflowEngine';
+import { CreateWorkflow } from './CreateWorkflow';
 
 interface TaskViewProps {
   tasks: Task[];
@@ -13,7 +17,9 @@ interface TaskViewProps {
 }
 
 export const TaskView: React.FC<TaskViewProps> = ({ tasks, onAddTask, onToggleTask }) => {
-  const [newTaskTitle, setNewTaskTitle] = React.useState('');
+  const { updateTask, addTask, addWorkflow } = useApp();
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [isCreatingWorkflow, setIsCreatingWorkflow] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +29,16 @@ export const TaskView: React.FC<TaskViewProps> = ({ tasks, onAddTask, onToggleTa
     }
   };
 
+  const handleCreateWorkflow = (title: string, steps: string[]) => {
+      addWorkflow(title, steps);
+      setIsCreatingWorkflow(false);
+  };
+
   const aiSuggestion = useMemo(() => suggestNextTask(tasks), [tasks]);
+
+  // Separate workflows from regular tasks
+  const workflowTasks = tasks.filter(t => t.workflow);
+  const regularTasks = tasks.filter(t => !t.workflow);
 
   return (
     <div className="h-full p-6 md:p-8 overflow-y-auto">
@@ -42,22 +57,59 @@ export const TaskView: React.FC<TaskViewProps> = ({ tasks, onAddTask, onToggleTa
           </div>
       )}
       
-      <form onSubmit={handleSubmit} className="mb-8 relative">
-        <input 
-          type="text" 
-          value={newTaskTitle}
-          onChange={(e) => setNewTaskTitle(e.target.value)}
-          placeholder="Adicionar nova tarefa..."
-          className="w-full p-4 pl-6 pr-12 rounded-2xl bg-white dark:bg-white/5 border border-transparent focus:border-custom-caramel outline-none shadow-sm dark:text-white"
-        />
-        <button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-custom-soil text-white rounded-xl hover:bg-custom-caramel transition-colors">
-            <Plus size={20} />
-        </button>
-      </form>
+      {/* Workflow Creation or Task Input */}
+      {isCreatingWorkflow ? (
+          <CreateWorkflow 
+            onCreate={handleCreateWorkflow} 
+            onCancel={() => setIsCreatingWorkflow(false)} 
+          />
+      ) : (
+          <div className="mb-8 flex gap-2">
+            <form onSubmit={handleSubmit} className="relative flex-1">
+                <input 
+                type="text" 
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                placeholder="Adicionar nova tarefa simples..."
+                className="w-full p-4 pl-6 pr-12 rounded-2xl bg-white dark:bg-white/5 border border-transparent focus:border-custom-caramel outline-none shadow-sm dark:text-white"
+                />
+                <button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-custom-soil text-white rounded-xl hover:bg-custom-caramel transition-colors">
+                    <Plus size={20} />
+                </button>
+            </form>
+            <button 
+                onClick={() => setIsCreatingWorkflow(true)}
+                className="p-4 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl transition-colors shadow-lg flex items-center gap-2"
+                title="Criar Fluxo de Trabalho"
+            >
+                <Layers size={20} />
+                <span className="hidden md:inline font-bold text-sm">Novo Fluxo</span>
+            </button>
+          </div>
+      )}
 
+      {/* Workflows Section (if any) */}
+      {workflowTasks.length > 0 && (
+        <div className="mb-8 space-y-4 animate-slide-up">
+           <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider flex items-center gap-2">
+             <Workflow size={14} /> Fluxos de Trabalho Ativos
+           </h3>
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {workflowTasks.map(task => (
+                <WorkflowCard 
+                  key={task.id} 
+                  task={task} 
+                  onUpdate={updateTask}
+                  onToggleComplete={onToggleTask}
+                />
+              ))}
+           </div>
+        </div>
+      )}
+
+      {/* Regular Tasks */}
       <div className="space-y-3">
-        {tasks.map((task) => {
-           // Ensure priority is calculated for display
+        {regularTasks.map((task) => {
            const priority = calculatePriority(task);
            return (
             <div key={task.id} className="group flex items-center gap-4 p-4 bg-white/60 dark:bg-white/5 backdrop-blur-sm rounded-2xl border border-white/40 dark:border-white/5 hover:shadow-lg transition-all animate-slide-up">
