@@ -300,13 +300,39 @@ export const StorageService = {
        try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-            const payload = {
-            name: profile.name, theme: profile.theme, working_hours: profile.workingHours,
-            notifications: profile.notifications, avatar_url: profile.avatarUrl, phone: profile.phone, 
-            role: profile.role, bio: profile.bio, plan: profile.plan
-            };
+            // Construct payload manually to map camelCase to snake_case and avoid sending undefined
+            const payload: any = {};
+            if (profile.name !== undefined) payload.name = profile.name;
+            if (profile.theme !== undefined) payload.theme = profile.theme;
+            if (profile.workingHours !== undefined) payload.working_hours = profile.workingHours;
+            if (profile.notifications !== undefined) payload.notifications = profile.notifications;
+            if (profile.avatarUrl !== undefined) payload.avatar_url = profile.avatarUrl;
+            if (profile.phone !== undefined) payload.phone = profile.phone;
+            if (profile.role !== undefined) payload.role = profile.role;
+            if (profile.bio !== undefined) payload.bio = profile.bio;
+            if (profile.plan !== undefined) payload.plan = profile.plan;
+            // Also sync email if available in user object just in case it's null in profile
+            if (user.email) payload.email = user.email;
+
             const { data, error } = await supabase.from('profiles').update(payload).eq('id', user.id).select();
-            if (!error && data) return { ...profile, ...data[0] } as UserProfile;
+            
+            if (!error && data && data.length > 0) {
+                const d = data[0];
+                return {
+                    id: d.id,
+                    name: d.name,
+                    email: d.email || user.email,
+                    avatarUrl: d.avatar_url,
+                    phone: d.phone,
+                    role: d.role,
+                    bio: d.bio,
+                    theme: d.theme,
+                    workingHours: d.working_hours,
+                    notifications: d.notifications,
+                    defaultReminder: 15,
+                    plan: d.plan || 'FREE'
+                } as UserProfile;
+            }
         }
        } catch (e) { console.warn("Profile update error", e); }
     }
