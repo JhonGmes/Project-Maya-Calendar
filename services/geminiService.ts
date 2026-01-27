@@ -131,6 +131,7 @@ export const chatWithMaya = async (
   `;
 
   // Select Model based on mode
+  // Using gemini-3-pro-preview for complex reasoning (thinking mode)
   const modelName = mode === 'thinking' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
 
   const config: any = {
@@ -140,6 +141,8 @@ export const chatWithMaya = async (
   // Configure Thinking Mode
   if (mode === 'thinking') {
       config.thinkingConfig = { thinkingBudget: 32768 };
+      // Note: responseMimeType is NOT set for thinking mode to allow free thought trace if exposed in future,
+      // but output schema instructions still guide it towards JSON.
   } else {
       // Standard Mode
       config.responseMimeType = "application/json";
@@ -172,7 +175,7 @@ export const chatWithMaya = async (
   } catch (error: any) {
     console.error("Chat Error Details:", error);
     
-    // Fallback strategy for Thinking Mode errors (often beta instability or timeouts)
+    // Fallback strategy for Thinking Mode errors (beta models can be unstable)
     if (mode === 'thinking') {
         console.log("⚠️ Thinking mode failed. Falling back to Flash model.");
         try {

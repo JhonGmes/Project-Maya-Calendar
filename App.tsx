@@ -161,7 +161,12 @@ const AppContent = () => {
 
       {/* Modals & Overlays */}
       <FocusOverlay />
-      <IAConfirmationModal />
+      
+      {/* 
+        Only show global confirmation if Chat is closed. 
+        If Chat is open, it handles confirmations inline for better UX.
+      */}
+      {!isMayaOpen && <IAConfirmationModal />}
       
       <MayaModal isOpen={isMayaOpen} onClose={() => setMayaOpen(false)} onAction={handleAIAction} allTasks={tasks} allEvents={events} />
       

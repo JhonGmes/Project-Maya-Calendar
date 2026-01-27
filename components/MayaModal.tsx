@@ -1,12 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video, Maximize2, Minimize2, Info } from 'lucide-react';
+import { X, Send, Sparkles, Mic, Image as ImageIcon, Volume2, Upload, Edit, Brain, AlertTriangle, Check, ArrowRight, Handshake, Video, Maximize2, Minimize2, Info, List, CalendarClock } from 'lucide-react';
 import { generateImage, generateSpeech, chatWithMaya, editImage, analyzeVideo } from '../services/geminiService';
 import { parseIAResponse } from '../utils/iaActionEngine';
 import { adaptTone } from '../utils/personalityEngine';
 import { CalendarEvent, Task, NegotiationOption } from '../types';
 import { useApp } from '../context/AppContext';
 import { useDebounce } from '../hooks/useDebounce';
+import { format } from 'date-fns';
 
 interface MayaModalProps {
   isOpen: boolean;
@@ -45,10 +46,8 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   // --- DEBOUNCE LOGIC FOR INTENT ANALYSIS ---
   const analyzeIntent = useDebounce((text: string) => {
       // Simulação: Aqui conectaríamos com o IAActionEngine para pré-processar intenção
-      // Ex: Se usuário digita "Reagendar...", a IA já prepara o contexto de calendário
       if (text.length > 5) {
-          console.log("Analyzing intent for:", text);
-          // dispatch({ type: "USER_TYPING", payload: text });
+          // console.log("Analyzing intent for:", text);
       }
   }, 600);
 
@@ -112,6 +111,12 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       await cancelIAAction();
   };
 
+  const handleAdjust = () => {
+      setPendingAction(null);
+      setInput("Gostaria de ajustar o seguinte: ");
+      if (textareaRef.current) textareaRef.current.focus();
+  };
+
   const handleNegotiationOption = async (option: NegotiationOption) => {
       setIaStatus('executing');
       setPendingAction(null);
@@ -161,7 +166,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
         let imageToAnalyze = null;
 
         if (selectedImage) {
-             // Heurística: Só entra no modo de edição se o usuário usar palavras-chave específicas
              if (lower.startsWith('editar') || lower.startsWith('mudar') || lower.includes('trocar fundo') || lower.includes('transformar')) {
                  const editPrompt = userMsg || "Descreva esta imagem";
                  const editedImage = await editImage(selectedImage, editPrompt);
@@ -174,8 +178,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                  setIaStatus('idle');
                  return;
              }
-             
-             // Se não for edição explícita, assume que é para análise no chat (criar tarefa, ler texto, etc)
              imageToAnalyze = selectedImage;
              setSelectedImage(null);
         }
@@ -243,6 +245,29 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  // Preview component for Reorganization
+  const renderReorganizationPreview = () => {
+      if (pendingAction?.originalAction.type !== 'REORGANIZE_WEEK') return null;
+      const changes = pendingAction.originalAction.payload.changes;
+      return (
+          <div className="bg-gray-50 dark:bg-black/20 p-3 rounded-xl mb-3 text-left max-h-40 overflow-y-auto border border-gray-100 dark:border-white/5 custom-scrollbar">
+              <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Plano Sugerido ({changes.length} Mudanças)</h4>
+              <div className="space-y-1.5">
+                  {changes.map((change: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between text-[10px] bg-white dark:bg-white/5 p-2 rounded-lg border border-gray-100 dark:border-white/5">
+                          <span className="font-medium truncate max-w-[45%] dark:text-gray-300">{change.taskTitle}</span>
+                          <div className="flex items-center gap-1.5 text-gray-400">
+                              <span className="line-through opacity-70">{new Date(change.from).getDate()}/{new Date(change.from).getMonth()+1}</span>
+                              <ArrowRight size={8} />
+                              <span className="text-green-600 dark:text-green-400 font-bold">{new Date(change.to).getDate()}/{new Date(change.to).getMonth()+1}</span>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      );
   };
 
   if (!isOpen) return null;
@@ -316,7 +341,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             )}
 
             {messages.map((msg) => {
-                // Determine Visual Style based on content keywords (UX Polish)
                 let bubbleStyle = msg.sender === 'user' 
                     ? 'bg-custom-soil text-white rounded-br-none' 
                     : 'bg-white dark:bg-zinc-800 border border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-none shadow-sm';
@@ -376,9 +400,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                                             className="w-full h-auto max-h-[60vh] object-contain" 
                                         />
                                     </div>
-                                    {msg.sender === 'user' && selectedVideo?.data === msg.content.split(',')[1] && (
-                                            <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Vídeo em análise</div>
-                                    )}
                                 </div>
                             )}
                         </div>
@@ -389,7 +410,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             {/* Negotiation UI */}
             {pendingAction && pendingAction.originalAction.type === 'NEGOTIATE_DEADLINE' && (
                 <div className="flex justify-start animate-slide-up w-full">
-                    <div className="bg-white dark:bg-zinc-800 p-5 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-orange-500 w-full">
+                    <div className="bg-white dark:bg-zinc-800 p-5 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-orange-500 w-full max-w-[90%]">
                         <div className="flex items-center gap-2 mb-3">
                             <Handshake className="text-orange-500" size={20} />
                             <p className="font-bold text-gray-800 dark:text-white text-sm">Proposta de Negociação</p>
@@ -400,7 +421,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                         </p>
 
                         <div className="space-y-2">
-                            {pendingAction.originalAction.payload.options.map((option, idx) => (
+                            {pendingAction.originalAction.payload.options.map((option: any, idx: number) => (
                                 <button
                                     key={idx}
                                     onClick={() => handleNegotiationOption(option)}
@@ -429,23 +450,42 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                 </div>
             )}
 
-            {/* Standard Confirmation UI */}
+            {/* Standard Confirmation UI with Preview */}
             {pendingAction && pendingAction.originalAction.type !== 'NEGOTIATE_DEADLINE' && (
-                <div className="flex justify-start animate-slide-up">
-                    <div className="bg-white dark:bg-zinc-800 p-4 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-custom-caramel">
-                        <p className="font-bold text-gray-800 dark:text-white mb-3 text-sm">{pendingAction.question}</p>
-                        <div className="flex gap-3">
+                <div className="flex justify-start animate-slide-up w-full">
+                    <div className="bg-white dark:bg-zinc-800 p-4 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-custom-caramel w-full max-w-[90%]">
+                        <div className="flex items-start gap-3 mb-4">
+                            <div className="p-2 bg-custom-caramel/10 rounded-full text-custom-caramel mt-1">
+                                {pendingAction.originalAction.type === 'REORGANIZE_WEEK' ? <List size={18} /> : 
+                                 pendingAction.originalAction.type === 'CREATE_TASK' ? <Check size={18} /> : 
+                                 pendingAction.originalAction.type === 'CREATE_EVENT' ? <CalendarClock size={18} /> : 
+                                 <Brain size={18} />}
+                            </div>
+                            <div>
+                                <p className="font-bold text-gray-800 dark:text-white text-sm">{pendingAction.question}</p>
+                            </div>
+                        </div>
+
+                        {renderReorganizationPreview()}
+
+                        <div className="flex gap-2">
                             <button 
                                 onClick={confirmAction}
-                                className="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                                className="flex-1 bg-green-500 hover:bg-green-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
                             >
-                                <Check size={14} /> Confirmar
+                                <Check size={14} /> Aceitar
+                            </button>
+                            <button 
+                                onClick={handleAdjust}
+                                className="flex-1 bg-blue-500 hover:bg-blue-600 text-white px-3 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                            >
+                                <Edit size={14} /> Ajustar
                             </button>
                             <button 
                                 onClick={cancelAction}
-                                className="flex-1 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 text-gray-600 dark:text-gray-300 px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                                className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/10 text-gray-500 hover:bg-gray-50 dark:hover:bg-white/5 text-xs font-bold flex items-center justify-center transition-colors"
                             >
-                                <X size={14} /> Cancelar
+                                Recusar
                             </button>
                         </div>
                     </div>
@@ -527,9 +567,9 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                     <textarea 
                         ref={textareaRef}
                         value={input}
-                        onChange={handleInputChange} // UPDATED TO USE DEBOUNCED HANDLER
+                        onChange={handleInputChange} 
                         onKeyDown={handleKeyDown}
-                        placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "O que fazer com a imagem?" : selectedVideo ? "Pergunte sobre o vídeo..." : "Mensagem ou comando...")}
+                        placeholder={pendingAction ? "Digite sua resposta..." : (selectedImage ? "O que fazer com a imagem?" : selectedVideo ? "Pergunte sobre o vídeo..." : "Mensagem ou comando...")}
                         rows={1}
                         className={`w-full bg-gray-100 dark:bg-black/50 border-none rounded-2xl py-3 pl-4 pr-12 focus:ring-2 dark:text-white transition-all resize-none overflow-hidden min-h-[48px] ${isThinkingMode ? 'focus:ring-purple-500/50 bg-purple-50/10' : 'focus:ring-custom-caramel/50'}`}
                     />
@@ -562,7 +602,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                     title="Ativar modelo Gemini 3 Pro para raciocínio complexo"
                  >
                     <Brain size={12} className={isThinkingMode ? 'animate-pulse' : ''} />
-                    {isThinkingMode ? 'Modo Pensador Ativado' : 'Modo Rápido'}
+                    {isThinkingMode ? 'Modo Pensador (Pro)' : 'Modo Rápido'}
                  </button>
              </div>
         </div>
