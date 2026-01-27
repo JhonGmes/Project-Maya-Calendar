@@ -12,6 +12,11 @@ export function detectPersonality(tasks: Task[]): PersonalityType {
 }
 
 export function adaptTone(message: string, personality: PersonalityType): string {
+  // Ignorar adaptação de tom se for uma mensagem de erro
+  if (message.startsWith("Erro:") || message.startsWith("Error:")) {
+      return message;
+  }
+
   if (personality === "disciplinado") {
     return `🚀 Excelente ritmo! ${message}`;
   }

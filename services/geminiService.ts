@@ -25,12 +25,15 @@ const getAI = () => {
   let key = process.env.API_KEY;
   
   // Fallback: Check Local Storage (User Manual Input)
-  if (!key && typeof window !== 'undefined') {
+  if ((!key || key.trim() === '') && typeof window !== 'undefined') {
       key = localStorage.getItem('maya_api_key') || '';
   }
 
+  // Trim whitespace just in case user pasted with spaces
+  key = key ? key.trim() : '';
+
   if (!key) {
-      console.error("CRITICAL: Gemini API Key is missing. Get one at https://aistudio.google.com/app/apikey");
+      console.error("CRITICAL: Gemini API Key is missing.");
       throw new Error("API_KEY_MISSING");
   }
   return new GoogleGenAI({ apiKey: key });
@@ -259,7 +262,7 @@ function cleanHistory(history: any[]): Content[] {
 
 export const chatWithMaya = async (message: string, history: any[], mode: 'fast' | 'thinking' = 'fast'): Promise<ChatResponse> => {
   try {
-    const ai = getAI();
+    const ai = getAI(); // Throws if key missing
     
     // Validate API Key presence
     if (!ai) {
@@ -329,9 +332,15 @@ export const chatWithMaya = async (message: string, history: any[], mode: 'fast'
 
   } catch (error: any) {
     console.error("Chat Error Details:", error);
-    if (error.message.includes("API Key") || error.message === "API_KEY_MISSING") {
-        return { text: "Erro: Chave de API ausente. Vá em Configurações > API Key e cole sua chave lá, ou verifique as variáveis do Vercel." };
+    
+    let errorMessage = "Desculpe, tive um problema de conexão. Tente novamente.";
+
+    if (error.message === "API_KEY_MISSING") {
+        errorMessage = "Erro: Chave de API não encontrada. Por favor, adicione sua chave nas Configurações > API Key.";
+    } else if (error.message.includes("API key") || error.message.includes("403") || error.message.includes("400")) {
+        errorMessage = "Erro: A Chave de API inserida parece inválida ou expirou. Verifique se copiou tudo corretamente (ela deve começar com 'AIza').";
     }
-    return { text: "Desculpe, tive um problema de conexão. Tente novamente." };
+    
+    return { text: errorMessage };
   }
 }

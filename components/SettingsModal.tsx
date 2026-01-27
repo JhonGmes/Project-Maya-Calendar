@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
-import { X, Moon, Sun, Bell, User, FileText, Key, Eye, EyeOff, Save } from 'lucide-react';
+import { X, Moon, Sun, Bell, User, FileText, Key, Eye, EyeOff, Save, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 interface SettingsModalProps {
@@ -16,11 +16,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
+  const [isValidFormat, setIsValidFormat] = useState(true);
 
   useEffect(() => {
       const storedKey = localStorage.getItem('maya_api_key');
-      if (storedKey) setApiKey(storedKey);
+      if (storedKey) {
+          setApiKey(storedKey);
+          setIsValidFormat(storedKey.startsWith('AIza'));
+      }
   }, []);
+
+  const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value.trim();
+      setApiKey(val);
+      if (val.length > 0 && !val.startsWith('AIza')) {
+          setIsValidFormat(false);
+      } else {
+          setIsValidFormat(true);
+      }
+  };
 
   const handleSaveKey = () => {
       if (apiKey.trim()) {
@@ -56,7 +70,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
             </div>
 
             {/* API Key Section */}
-            <div className="space-y-2 p-4 bg-purple-50 dark:bg-purple-900/10 rounded-2xl border border-purple-100 dark:border-purple-500/20">
+            <div className={`space-y-2 p-4 rounded-2xl border ${!isValidFormat && apiKey ? 'bg-red-50 border-red-200 dark:bg-red-900/10' : 'bg-purple-50 border-purple-100 dark:bg-purple-900/10'}`}>
                 <div className="flex items-center gap-2 text-purple-800 dark:text-purple-300 mb-2">
                     <Key size={16} />
                     <h4 className="text-sm font-bold uppercase tracking-wider">Configuração de IA</h4>
@@ -64,14 +78,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                     Cole sua Google Gemini API Key aqui para habilitar a inteligência da Maya.
                 </p>
-                <div className="flex gap-2">
+                
+                <div className="flex gap-2 relative">
                     <div className="relative flex-1">
                         <input 
                             type={showKey ? "text" : "password"} 
                             value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
+                            onChange={handleApiKeyChange}
                             placeholder="Cole sua chave AIza..."
-                            className="w-full pl-3 pr-10 py-2 rounded-lg text-sm bg-white dark:bg-black/30 border border-purple-200 dark:border-purple-500/30 focus:ring-2 focus:ring-purple-500 outline-none dark:text-white"
+                            className={`w-full pl-3 pr-10 py-2 rounded-lg text-sm bg-white dark:bg-black/30 border focus:ring-2 outline-none dark:text-white ${!isValidFormat && apiKey ? 'border-red-400 focus:ring-red-400' : 'border-purple-200 focus:ring-purple-500'}`}
                         />
                         <button 
                             onClick={() => setShowKey(!showKey)}
@@ -84,9 +99,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
                         onClick={handleSaveKey}
                         className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${keySaved ? 'bg-green-500 text-white' : 'bg-purple-600 text-white hover:bg-purple-700'}`}
                     >
-                        {keySaved ? 'Salvo!' : 'Salvar'}
+                        {keySaved ? <CheckCircle size={14} /> : 'Salvar'}
                     </button>
                 </div>
+
+                {!isValidFormat && apiKey && (
+                    <div className="flex items-center gap-2 text-xs text-red-500 mt-1 animate-pulse">
+                        <AlertTriangle size={12} />
+                        <span>Atenção: Chaves do Google geralmente começam com "AIza". Verifique se copiou corretamente.</span>
+                    </div>
+                )}
+                
                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline inline-block mt-1">
                     Não tem uma chave? Gere aqui.
                 </a>
