@@ -117,11 +117,13 @@ export const chatWithMaya = async (
     - ASK_CONFIRMATION: { message: string, action: ActionObject } 
     - NEGOTIATE_DEADLINE: { taskTitle: string, reason: string, options: [{ label: string, action: ActionObject }] }
     - COMPLETE_STEP: { taskId: string, stepId: string, workflowId: string }
+    - PROPOSE_WORKFLOW: { title: string, steps: string[], description?: string }
     - NO_ACTION: {} 
 
     RULES:
     - If user says "My week is messy" or overload is detected, propose REORGANIZE_WEEK.
     - If user asks about performance, use CHANGE_SCREEN to 'analytics'.
+    - If user asks to create a process, workflow, or "how to organize X", use PROPOSE_WORKFLOW with a logical list of steps.
     - If user asks to complete a workflow step, you MUST use ASK_CONFIRMATION wrapping COMPLETE_STEP.
     - Response MUST be ONLY the JSON object. Do not add markdown blocks like \`\`\`json.
     `;
@@ -136,7 +138,7 @@ export const chatWithMaya = async (
         config.thinkingConfig = { thinkingBudget: 32768 };
         // IMPORTANT: maxOutputTokens must NOT be set when using thinkingConfig with this budget.
     } else {
-        // Only set maxOutputTokens for non-thinking models
+        // Only set for non-thinking models
         config.maxOutputTokens = 8192;
     }
 

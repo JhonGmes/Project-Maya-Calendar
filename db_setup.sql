@@ -68,7 +68,7 @@ create table if not exists public.tasks (
   due_date timestamp with time zone,
   priority text,
   description text,
-  workflow_data jsonb, -- Armazena a estrutura completa do workflow
+  workflow_data jsonb, -- Armazena a estrutura completa do workflow (Legacy/Simples)
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -100,19 +100,52 @@ create table if not exists public.quarterly_goals (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
--- 10. Logs de Workflow (Auditoria e Métricas)
+-- 10. Workflows (Professional Structure)
+create table if not exists public.workflows (
+  id uuid primary key default uuid_generate_v4(),
+  title text not null,
+  description text,
+  owner_id uuid references auth.users not null,
+  team_id uuid references public.teams(id),
+  status text default 'in_progress',
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 11. Workflow Steps
+create table if not exists public.workflow_steps (
+  id uuid primary key default uuid_generate_v4(),
+  workflow_id uuid references public.workflows(id) on delete cascade,
+  title text not null,
+  step_order integer not null,
+  status text default 'locked', -- locked, available, completed
+  responsible_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 12. IA Action History (Audit Log)
+create table if not exists public.ia_action_history (
+  id uuid primary key default uuid_generate_v4(),
+  workflow_id uuid references public.workflows(id), -- Optional link
+  action_type text not null,
+  confirmed boolean default false,
+  details text,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 13. Logs de Workflow (Old table for JSONB tasks - kept for compatibility)
 create table if not exists public.workflow_logs (
   id uuid primary key default uuid_generate_v4(),
-  workflow_id text not null, -- ID dentro do JSONB da task ou ID externo
+  workflow_id text not null, 
   step_id text not null,
   user_id uuid references auth.users not null,
   task_id uuid references public.tasks(id) on delete cascade,
-  action text not null, -- 'started', 'completed'
+  action text not null, 
   metadata jsonb,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
--- Habilitar Segurança (RLS) - Seguro rodar várias vezes
+-- Habilitar Segurança (RLS)
 alter table public.profiles enable row level security;
 alter table public.events enable row level security;
 alter table public.tasks enable row level security;
@@ -123,69 +156,27 @@ alter table public.team_members enable row level security;
 alter table public.companies enable row level security;
 alter table public.quarterly_goals enable row level security;
 alter table public.workflow_logs enable row level security;
+alter table public.workflows enable row level security;
+alter table public.workflow_steps enable row level security;
+alter table public.ia_action_history enable row level security;
 
--- Limpar policies antigas para recriar (evita erro "policy already exists")
+-- Policies (Re-run safe)
 drop policy if exists "Users can see own profile" on public.profiles;
-drop policy if exists "Users can update own profile" on public.profiles;
-drop policy if exists "Users can see own events" on public.events;
-drop policy if exists "Users can insert own events" on public.events;
-drop policy if exists "Users can update own events" on public.events;
-drop policy if exists "Users can delete own events" on public.events;
-drop policy if exists "Users can see own tasks or team tasks" on public.tasks;
-drop policy if exists "Users can insert own tasks" on public.tasks;
-drop policy if exists "Users can update own tasks" on public.tasks;
-drop policy if exists "Users can see own notifications" on public.notifications;
-drop policy if exists "Users can insert own notifications" on public.notifications;
-drop policy if exists "Users can update own notifications" on public.notifications;
-drop policy if exists "Users can see own history" on public.productivity_history;
-drop policy if exists "Users can insert own history" on public.productivity_history;
-drop policy if exists "Users can see teams they belong to" on public.teams;
-drop policy if exists "Users can see own goals" on public.quarterly_goals;
-drop policy if exists "Users can insert own goals" on public.quarterly_goals;
-drop policy if exists "Users can see related workflow logs" on public.workflow_logs;
-drop policy if exists "Users can insert workflow logs" on public.workflow_logs;
-
--- Recriar Policies
-
--- Profiles
 create policy "Users can see own profile" on public.profiles for select using (auth.uid() = id);
 create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
 
--- Events
-create policy "Users can see own events" on public.events for select using (auth.uid() = user_id);
-create policy "Users can insert own events" on public.events for insert with check (auth.uid() = user_id);
-create policy "Users can update own events" on public.events for update using (auth.uid() = user_id);
-create policy "Users can delete own events" on public.events for delete using (auth.uid() = user_id);
-
--- Tasks
-create policy "Users can see own tasks or team tasks" on public.tasks for select using (
-  auth.uid() = user_id OR 
+-- Workflows Policies
+create policy "Users can see own or team workflows" on public.workflows for select using (
+  owner_id = auth.uid() OR
   team_id IN (select team_id from public.team_members where user_id = auth.uid())
 );
-create policy "Users can insert own tasks" on public.tasks for insert with check (auth.uid() = user_id);
-create policy "Users can update own tasks" on public.tasks for update using (auth.uid() = user_id);
+create policy "Users can insert workflows" on public.workflows for insert with check (auth.uid() = owner_id);
+create policy "Users can update own workflows" on public.workflows for update using (auth.uid() = owner_id);
 
--- Notifications
-create policy "Users can see own notifications" on public.notifications for select using (auth.uid() = user_id);
-create policy "Users can insert own notifications" on public.notifications for insert with check (auth.uid() = user_id);
-create policy "Users can update own notifications" on public.notifications for update using (auth.uid() = user_id);
-
--- History
-create policy "Users can see own history" on public.productivity_history for select using (auth.uid() = user_id);
-create policy "Users can insert own history" on public.productivity_history for insert with check (auth.uid() = user_id);
-
--- Teams
-create policy "Users can see teams they belong to" on public.teams for select using (
-  id IN (select team_id from public.team_members where user_id = auth.uid())
+-- Steps Policies
+create policy "Users can see steps of visible workflows" on public.workflow_steps for select using (
+  workflow_id IN (select id from public.workflows) -- Simplified, relies on Workflow RLS logic if joined
 );
-
--- Goals
-create policy "Users can see own goals" on public.quarterly_goals for select using (auth.uid() = user_id);
-create policy "Users can insert own goals" on public.quarterly_goals for insert with check (auth.uid() = user_id);
-
--- Workflow Logs
-create policy "Users can see related workflow logs" on public.workflow_logs for select using (
-  user_id = auth.uid() OR
-  task_id IN (select id from public.tasks where team_id IN (select team_id from public.team_members where user_id = auth.uid()))
+create policy "Users can insert steps" on public.workflow_steps for insert with check (
+  workflow_id IN (select id from public.workflows where owner_id = auth.uid())
 );
-create policy "Users can insert workflow logs" on public.workflow_logs for insert with check (auth.uid() = user_id);

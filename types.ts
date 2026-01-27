@@ -38,6 +38,7 @@ export interface WorkflowStep {
       name: string;
       avatarUrl?: string;
   };
+  responsible?: string; // User ID
 }
 
 export interface IAActionHistory {
@@ -67,6 +68,7 @@ export interface WorkflowTemplate {
     steps: {
         title: string;
         order: number;
+        defaultResponsible?: string;
     }[];
 }
 
@@ -80,6 +82,19 @@ export interface WorkflowLog {
   action: 'started' | 'completed';
   timestamp: string;
   metadata?: any;
+}
+
+// NEW: Metrics
+export type WorkflowMetrics = {
+  totalSteps: number;
+  completedSteps: number;
+  completionRate: number;
+}
+
+export type UserMetrics = {
+  userId: string;
+  completedSteps: number;
+  workflowsInvolved: number;
 }
 
 export interface Task {
@@ -318,6 +333,14 @@ export type IAAction =
           taskId: string;
           stepId: string;
           workflowId: string;
+      };
+    }
+  | {
+      type: "PROPOSE_WORKFLOW"; // New: AI Proposes a Workflow Structure
+      payload: {
+          title: string;
+          steps: string[];
+          description?: string;
       };
     }
   | {

@@ -607,11 +607,40 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              });
              setMayaOpen(true);
              break;
+        case "PROPOSE_WORKFLOW":
+             // AI proposes a workflow -> Trigger confirmation to create it
+             setPendingAction({
+                 originalAction: action,
+                 question: `Posso criar o fluxo de trabalho "${action.payload.title}" com ${action.payload.steps.length} etapas?\n\nEtapas:\n${action.payload.steps.map((s, i) => `${i+1}. ${s}`).join('\n')}`
+             });
+             break;
         case "REPLY":
              addMessage({ id: Date.now().toString(), sender: 'maya', text: action.payload.message });
              break;
         default: break;
     }
+  };
+
+  // Handle PROPOSE_WORKFLOW confirmation inside the "execute" flow if user says Yes
+  // But wait, executeIAAction is called AFTER confirmation in MayaModal for pending actions.
+  // So we need to handle the actual creation inside executeIAAction for PROPOSE_WORKFLOW type.
+  // Let's patch executeIAAction above to handle the creation.
+  
+  // Correction: The PROPOSE_WORKFLOW case in switch above sets pendingAction. 
+  // When user clicks "Confirm", executeIAAction is called AGAIN with source="ai" (or "user" depending on call).
+  // We need a case to actually CREATE it.
+  
+  const executeIAActionExpanded = async (action: IAAction, source: "user" | "ai" = "ai") => {
+      // Intercept creation
+      if (action.type === 'PROPOSE_WORKFLOW') {
+          // If we are here, it means confirmed
+          await addWorkflow(action.payload.title, action.payload.steps);
+          addToast({ id: Date.now().toString(), title: "Fluxo Criado", message: "Processo iniciado com sucesso.", type: "success" });
+          return;
+      }
+      
+      // Fallback to original
+      await executeIAAction(action, source);
   };
 
   return (
@@ -634,7 +663,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         iaStatus, setIaStatus,
         messages, addMessage,
         pendingAction, setPendingAction,
-        executeIAAction,
+        executeIAAction: executeIAActionExpanded, // Use the wrapper
         cancelIAAction,
         iaHistory,
         agentSuggestion, setAgentSuggestion,
