@@ -185,7 +185,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         dispatch({ type: "SET_EVENTS", payload: loadedEvents });
 
         setAllTasks(loadedTasks);
-        setProfile(loadedProfile);
+        
+        // Profile Synchronization with Auth
+        let finalProfile = loadedProfile;
+        if (user && (loadedProfile.id === 'user-local' || loadedProfile.email !== user.email)) {
+             // If we have a real user but profile is local/default or email mismatch, sync it
+             finalProfile = {
+                 ...loadedProfile,
+                 id: user.id,
+                 email: user.email || '',
+                 name: loadedProfile.name !== 'Convidado Local' ? loadedProfile.name : (user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário')
+             };
+             // Optional: persist this update immediately if needed, but saving on edit is usually safer
+        }
+        setProfile(finalProfile);
+
         setScoreHistory(loadedHistory);
         setTeams(loadedTeams);
         setNotifications(loadedNotifs);
@@ -217,7 +231,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const storedSession = StorageService.getFocusSession();
         setFocusSession(storedSession);
         
-        if (loadedProfile.theme === 'dark') document.documentElement.classList.add('dark');
+        if (finalProfile.theme === 'dark') document.documentElement.classList.add('dark');
         
         setDailyFocus(getDailyFocus(personalTasks));
         setPersonality(detectPersonality(personalTasks));

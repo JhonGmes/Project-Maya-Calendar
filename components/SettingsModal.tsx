@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile } from '../types';
-import { X, Moon, Sun, Bell, User, FileText, Key, Eye, EyeOff, CheckCircle, LogOut, CreditCard, Zap, ShieldCheck, Save, Camera, Phone, Mail } from 'lucide-react';
+import { X, Moon, Sun, Bell, User, FileText, Key, Eye, EyeOff, CheckCircle, LogOut, CreditCard, Zap, ShieldCheck, Save, Camera, Phone, Mail, Upload } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { getPlanName, PLAN_CONFIG } from '../utils/plans';
@@ -17,12 +17,13 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, profile, onSaveProfile }) => {
   const { generateReport, currentTeam, aiUsage, iaHistory } = useApp();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth(); // Get real user from AuthContext
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [isValidFormat, setIsValidFormat] = useState(true);
   const [activeTab, setActiveTab] = useState<'general' | 'audit'>('general');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Local state for profile editing
   const [editForm, setEditForm] = useState({
@@ -77,6 +78,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
       });
   };
 
+  // Handle File Upload for Avatar
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              const base64String = reader.result as string;
+              setEditForm(prev => ({ ...prev, avatarUrl: base64String }));
+          };
+          reader.readAsDataURL(file);
+      }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -120,26 +134,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
                         <div className="flex flex-col md:flex-row gap-6">
                             {/* Avatar Section */}
                             <div className="flex flex-col items-center gap-3">
-                                <div className="w-24 h-24 rounded-full bg-gray-200 dark:bg-white/10 flex items-center justify-center overflow-hidden border-4 border-white dark:border-zinc-700 shadow-md relative group">
+                                <div 
+                                    className="w-24 h-24 rounded-full bg-gray-200 dark:bg-white/10 flex items-center justify-center overflow-hidden border-4 border-white dark:border-zinc-700 shadow-md relative group cursor-pointer"
+                                    onClick={() => fileInputRef.current?.click()}
+                                >
                                     {editForm.avatarUrl ? (
                                         <img src={editForm.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
                                     ) : (
                                         <User size={40} className="text-gray-400" />
                                     )}
-                                </div>
-                                <div className="w-full">
-                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">URL da Foto</label>
-                                    <div className="flex items-center gap-2 bg-gray-50 dark:bg-black/20 rounded-lg border border-gray-200 dark:border-white/10 px-2 py-1.5">
-                                        <Camera size={14} className="text-gray-400" />
-                                        <input 
-                                            type="text"
-                                            value={editForm.avatarUrl}
-                                            onChange={(e) => setEditForm({...editForm, avatarUrl: e.target.value})}
-                                            placeholder="https://..."
-                                            className="bg-transparent w-full text-xs outline-none dark:text-white"
-                                        />
+                                    
+                                    {/* Hover Overlay */}
+                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Camera size={24} className="text-white" />
                                     </div>
                                 </div>
+                                
+                                <input 
+                                    type="file" 
+                                    ref={fileInputRef} 
+                                    onChange={handleAvatarChange} 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                />
+                                
+                                <button 
+                                    type="button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="text-[10px] font-bold text-custom-caramel hover:underline uppercase tracking-wider flex items-center gap-1"
+                                >
+                                    <Upload size={10} /> Alterar Foto
+                                </button>
                             </div>
 
                             {/* Inputs Section */}
@@ -162,7 +187,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, p
                                         </label>
                                         <input 
                                             type="text"
-                                            value={profile.email}
+                                            // Prefer Authenticated User Email over Profile state if available
+                                            value={user?.email || profile.email}
                                             disabled
                                             className="w-full bg-gray-100 dark:bg-white/5 border border-transparent rounded-xl px-4 py-2.5 outline-none text-gray-500 cursor-not-allowed"
                                         />
