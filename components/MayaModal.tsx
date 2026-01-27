@@ -53,7 +53,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
           reader.onloadend = () => {
               const base64 = reader.result as string;
               setSelectedImage(base64);
-              addMessage({ id: Date.now().toString(), sender: 'user', text: 'Imagem carregada para edição', type: 'image', content: base64 });
+              addMessage({ id: Date.now().toString(), sender: 'user', text: 'Imagem carregada', type: 'image', content: base64 });
           };
           reader.readAsDataURL(file);
       }
@@ -139,17 +139,27 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
         }
 
         const lower = userMsg.toLowerCase().trim();
+        
+        let imageToAnalyze = null;
 
         if (selectedImage) {
-             const editPrompt = userMsg || "Descreva esta imagem";
-             const editedImage = await editImage(selectedImage, editPrompt);
-             if (editedImage) {
-                 sendAIMessage(`Aqui está o resultado: "${editPrompt}"`, 'image', editedImage);
-                 setSelectedImage(null); 
-             } else {
-                 sendAIMessage('Não consegui editar a imagem. Tente novamente.');
+             // Heurística: Só entra no modo de edição se o usuário usar palavras-chave específicas
+             if (lower.startsWith('editar') || lower.startsWith('mudar') || lower.includes('trocar fundo') || lower.includes('transformar')) {
+                 const editPrompt = userMsg || "Descreva esta imagem";
+                 const editedImage = await editImage(selectedImage, editPrompt);
+                 if (editedImage) {
+                     sendAIMessage(`Aqui está o resultado: "${editPrompt}"`, 'image', editedImage);
+                     setSelectedImage(null); 
+                 } else {
+                     sendAIMessage('Não consegui editar a imagem. Tente novamente.');
+                 }
+                 setIaStatus('idle');
+                 return;
              }
-             return;
+             
+             // Se não for edição explícita, assume que é para análise no chat (criar tarefa, ler texto, etc)
+             imageToAnalyze = selectedImage;
+             setSelectedImage(null);
         }
 
         if (lower.startsWith('gerar imagem') || lower.startsWith('crie uma imagem')) {
@@ -160,6 +170,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             } else {
                 sendAIMessage('Desculpe, não consegui gerar a imagem.');
             }
+            setIaStatus('idle');
             return;
         } 
 
@@ -180,6 +191,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
              } else {
                  sendAIMessage('Erro ao gerar áudio.');
              }
+             setIaStatus('idle');
              return;
         }
 
@@ -189,7 +201,8 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             userMsg, 
             history, 
             isThinkingMode ? 'thinking' : 'fast',
-            { tasks, events, history: iaHistory, currentTeam, userRole }
+            { tasks, events, history: iaHistory, currentTeam, userRole },
+            imageToAnalyze // Pass the image for multimodal analysis
         );
 
         const parsedResponse = parseIAResponse(rawResponse);
@@ -317,7 +330,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                                     <p className="opacity-80 text-xs mb-1">{msg.text}</p>
                                     <img src={msg.content} alt="Generated" className="rounded-lg w-full h-auto border border-white/10" />
                                     {msg.sender === 'user' && selectedImage === msg.content && (
-                                        <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Imagem selecionada para edição</div>
+                                        <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Imagem pronta para envio</div>
                                     )}
                                     {msg.sender === 'maya' && (
                                         <button 
@@ -440,7 +453,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
              <div className="px-4 py-2 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
                  <div className="flex items-center gap-2">
                      <img src={selectedImage} alt="Preview" className="w-10 h-10 rounded object-cover border border-white/20" />
-                     <span className="text-xs text-gray-500">Editando imagem... (Digite o comando)</span>
+                     <span className="text-xs text-gray-500">Imagem pronta. Digite para analisar ou "Editar" para alterar.</span>
                  </div>
                  <button onClick={() => setSelectedImage(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={14} className="text-gray-400" /></button>
              </div>
@@ -479,7 +492,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                  <button 
                     onClick={() => fileInputRef.current?.click()}
                     className="p-3 bg-gray-100 dark:bg-white/5 text-gray-500 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-                    title="Carregar imagem para edição"
+                    title="Carregar imagem para edição ou análise"
                  >
                      <ImageIcon size={18} />
                  </button>
@@ -498,7 +511,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "Digite como editar..." : selectedVideo ? "Pergunte sobre o vídeo..." : "Mensagem ou comando...")}
+                        placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "O que fazer com a imagem?" : selectedVideo ? "Pergunte sobre o vídeo..." : "Mensagem ou comando...")}
                         rows={1}
                         className={`w-full bg-gray-100 dark:bg-black/50 border-none rounded-2xl py-3 pl-4 pr-12 focus:ring-2 dark:text-white transition-all resize-none overflow-hidden min-h-[48px] ${isThinkingMode ? 'focus:ring-purple-500/50 bg-purple-50/10' : 'focus:ring-custom-caramel/50'}`}
                     />

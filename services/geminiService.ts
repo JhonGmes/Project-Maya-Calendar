@@ -65,7 +65,8 @@ export const chatWithMaya = async (
     message: string, 
     history: any[], 
     mode: 'fast' | 'thinking' = 'fast',
-    appContext?: { tasks: Task[], events: CalendarEvent[], history: IAHistoryItem[], currentTeam?: Team | null, userRole?: UserRole }
+    appContext?: { tasks: Task[], events: CalendarEvent[], history: IAHistoryItem[], currentTeam?: Team | null, userRole?: UserRole },
+    imageBase64?: string | null
 ): Promise<string> => {
   const ai = getAI();
   if (!ai) throw new Error("API_KEY_MISSING");
@@ -125,6 +126,7 @@ export const chatWithMaya = async (
   - If user asks about performance, use CHANGE_SCREEN to 'analytics'.
   - If user asks to create a process, workflow, or "how to organize X", use PROPOSE_WORKFLOW with a logical list of steps.
   - If user asks to complete a workflow step, you MUST use ASK_CONFIRMATION wrapping COMPLETE_STEP.
+  - If the user provides an image, analyze it to extract tasks, events, or context.
   - Response MUST be ONLY the JSON object. Do not add markdown blocks like \`\`\`json.
   `;
 
@@ -138,9 +140,6 @@ export const chatWithMaya = async (
   // Configure Thinking Mode
   if (mode === 'thinking') {
       config.thinkingConfig = { thinkingBudget: 32768 };
-      // IMPORTANT: When using thinkingConfig, we CANNOT force responseMimeType to 'application/json' 
-      // in some contexts because the thought trace is text. The prompt handles the JSON structure.
-      // Also, maxOutputTokens must NOT be set.
   } else {
       // Standard Mode
       config.responseMimeType = "application/json";
@@ -154,7 +153,20 @@ export const chatWithMaya = async (
       config: config
     });
 
-    const result = await chat.sendMessage({ message });
+    // Handle Multimodal Input
+    let messageContent: string | any[] = message;
+    
+    if (imageBase64) {
+        // Strip prefix if present (data:image/png;base64,)
+        const base64Clean = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
+        
+        messageContent = [
+            { text: message },
+            { inlineData: { mimeType: "image/png", data: base64Clean } }
+        ];
+    }
+
+    const result = await chat.sendMessage(messageContent);
     return result.text;
 
   } catch (error: any) {
@@ -173,7 +185,17 @@ export const chatWithMaya = async (
                     maxOutputTokens: 8192
                 }
             });
-            const fallbackResult = await fallbackChat.sendMessage({ message });
+            // Construct payload again for fallback
+            let fallbackContent: string | any[] = message;
+            if (imageBase64) {
+                const base64Clean = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
+                fallbackContent = [
+                    { text: message },
+                    { inlineData: { mimeType: "image/png", data: base64Clean } }
+                ];
+            }
+
+            const fallbackResult = await fallbackChat.sendMessage(fallbackContent);
             return fallbackResult.text;
         } catch (fallbackError) {
             console.error("Fallback also failed:", fallbackError);
