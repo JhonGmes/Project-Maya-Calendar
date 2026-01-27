@@ -2,6 +2,8 @@
 import { GoogleGenAI, Content } from "@google/genai";
 import { IAResponse, Task, CalendarEvent, IAHistoryItem, Team, UserRole } from "../types";
 import { buildIAContext } from "../utils/iaContextBuilder";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 // --- ENVIRONMENT SHIM ---
 try {
@@ -65,85 +67,87 @@ export const chatWithMaya = async (
     mode: 'fast' | 'thinking' = 'fast',
     appContext?: { tasks: Task[], events: CalendarEvent[], history: IAHistoryItem[], currentTeam?: Team | null, userRole?: UserRole }
 ): Promise<string> => {
+  const ai = getAI();
+  if (!ai) throw new Error("API_KEY_MISSING");
+
+  const validHistory = cleanHistory(history);
+  const now = new Date();
+  
+  // FIX: Use Local Time formatting instead of UTC ISO
+  const dayName = format(now, "EEEE", { locale: ptBR });
+  const localTime = format(now, "HH:mm", { locale: ptBR });
+  const fullDate = format(now, "dd/MM/yyyy", { locale: ptBR });
+
+  // Construir o contexto dinâmico
+  const dynamicContext = appContext 
+      ? buildIAContext(appContext.tasks, appContext.events, appContext.history, appContext.currentTeam, appContext.userRole)
+      : "No context provided.";
+
+  // O Prompt do Sistema agora define o protocolo de comunicação E PERSONA DE GESTÃO
+  const systemPrompt = `
+  You are Maya, an advanced AI system agent for productivity and team management.
+  Current Date: ${fullDate} (${dayName}).
+  Current Local Time: ${localTime}.
+  
+  APP CONTEXT (READ-ONLY):
+  ${dynamicContext}
+  
+  PROTOCOL:
+  1. You act as an intermediary between the user and the app state.
+  2. You DO NOT execute actions yourself. You return JSON instructions (Action Proposals).
+  3. You MUST ALWAYS return a valid JSON object matching the Output Schema below.
+  
+  OUTPUT SCHEMA:
+  {
+    "message": "Your conversational response to the user (e.g. 'Entendido, sugiro agendar isso.')",
+    "actions": [ ... list of action objects ... ]
+  }
+
+  PERSONA & BEHAVIOR:
+  - If contextMode is 'PERSONAL_MODE': Focus on execution, focus, and clearing the user's daily schedule.
+  - If contextMode is 'TEAM_MODE' and userRole is 'manager': Focus on team alignment, identifying bottlenecks, and preventing burnout. Do not micromanage individual task completion unless asked. Suggest 'REORGANIZE_WEEK' if the whole team is overloaded.
+  - If contextMode is 'TEAM_MODE' and userRole is 'member': Focus on the user's assigned tasks within the team context.
+
+  AVAILABLE ACTIONS (Types):
+  - CREATE_TASK: { title: string, priority?: 'high'|'medium'|'low', dueDate?: string (ISO) }
+  - CREATE_EVENT: { title: string, start: string (ISO), end?: string (ISO), category?: string }
+  - RESCHEDULE_TASK: { taskId: string, newDate: string (ISO) }
+  - REORGANIZE_WEEK: { changes: [{ taskId: string, taskTitle: string, from: string (ISO), to: string (ISO) }], reason: string }
+  - CHANGE_SCREEN: { payload: 'day'|'week'|'month'|'tasks'|'analytics' }
+  - ASK_CONFIRMATION: { message: string, action: ActionObject } 
+  - NEGOTIATE_DEADLINE: { taskTitle: string, reason: string, options: [{ label: string, action: ActionObject }] }
+  - COMPLETE_STEP: { taskId: string, stepId: string, workflowId: string }
+  - PROPOSE_WORKFLOW: { title: string, steps: string[], description?: string }
+  - NO_ACTION: {} 
+
+  RULES:
+  - If user says "My week is messy" or overload is detected, propose REORGANIZE_WEEK.
+  - If user asks about performance, use CHANGE_SCREEN to 'analytics'.
+  - If user asks to create a process, workflow, or "how to organize X", use PROPOSE_WORKFLOW with a logical list of steps.
+  - If user asks to complete a workflow step, you MUST use ASK_CONFIRMATION wrapping COMPLETE_STEP.
+  - Response MUST be ONLY the JSON object. Do not add markdown blocks like \`\`\`json.
+  `;
+
+  // Select Model based on mode
+  const modelName = mode === 'thinking' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+
+  const config: any = {
+       systemInstruction: systemPrompt
+  };
+
+  // Configure Thinking Mode
+  if (mode === 'thinking') {
+      config.thinkingConfig = { thinkingBudget: 32768 };
+      // IMPORTANT: When using thinkingConfig, we CANNOT force responseMimeType to 'application/json' 
+      // in some contexts because the thought trace is text. The prompt handles the JSON structure.
+      // Also, maxOutputTokens must NOT be set.
+  } else {
+      // Standard Mode
+      config.responseMimeType = "application/json";
+      config.maxOutputTokens = 8192;
+  }
+
   try {
-    const ai = getAI();
-    
-    if (!ai) throw new Error("API_KEY_MISSING");
-
-    const validHistory = cleanHistory(history);
-    const now = new Date();
-    const days = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-    const dayName = days[now.getDay()];
-
-    // Construir o contexto dinâmico
-    const dynamicContext = appContext 
-        ? buildIAContext(appContext.tasks, appContext.events, appContext.history, appContext.currentTeam, appContext.userRole)
-        : "No context provided.";
-
-    // Select Model based on mode
-    // Thinking Mode uses gemini-3-pro-preview
-    const modelName = mode === 'thinking' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
-
-    // O Prompt do Sistema agora define o protocolo de comunicação E PERSONA DE GESTÃO
-    const systemPrompt = `
-    You are Maya, an advanced AI system agent for productivity and team management.
-    Current Time: ${now.toISOString()} (${dayName}).
-    
-    APP CONTEXT (READ-ONLY):
-    ${dynamicContext}
-    
-    PROTOCOL:
-    1. You act as an intermediary between the user and the app state.
-    2. You DO NOT execute actions yourself. You return JSON instructions (Action Proposals).
-    3. You MUST ALWAYS return a valid JSON object matching the Output Schema below.
-    
-    OUTPUT SCHEMA:
-    {
-      "message": "Your conversational response to the user (e.g. 'Entendido, sugiro agendar isso.')",
-      "actions": [ ... list of action objects ... ]
-    }
-
-    PERSONA & BEHAVIOR:
-    - If contextMode is 'PERSONAL_MODE': Focus on execution, focus, and clearing the user's daily schedule.
-    - If contextMode is 'TEAM_MODE' and userRole is 'manager': Focus on team alignment, identifying bottlenecks, and preventing burnout. Do not micromanage individual task completion unless asked. Suggest 'REORGANIZE_WEEK' if the whole team is overloaded.
-    - If contextMode is 'TEAM_MODE' and userRole is 'member': Focus on the user's assigned tasks within the team context.
-
-    AVAILABLE ACTIONS (Types):
-    - CREATE_TASK: { title: string, priority?: 'high'|'medium'|'low', dueDate?: string (ISO) }
-    - CREATE_EVENT: { title: string, start: string (ISO), end?: string (ISO), category?: string }
-    - RESCHEDULE_TASK: { taskId: string, newDate: string (ISO) }
-    - REORGANIZE_WEEK: { changes: [{ taskId: string, taskTitle: string, from: string (ISO), to: string (ISO) }], reason: string }
-    - CHANGE_SCREEN: { payload: 'day'|'week'|'month'|'tasks'|'analytics' }
-    - ASK_CONFIRMATION: { message: string, action: ActionObject } 
-    - NEGOTIATE_DEADLINE: { taskTitle: string, reason: string, options: [{ label: string, action: ActionObject }] }
-    - COMPLETE_STEP: { taskId: string, stepId: string, workflowId: string }
-    - PROPOSE_WORKFLOW: { title: string, steps: string[], description?: string }
-    - NO_ACTION: {} 
-
-    RULES:
-    - If user says "My week is messy" or overload is detected, propose REORGANIZE_WEEK.
-    - If user asks about performance, use CHANGE_SCREEN to 'analytics'.
-    - If user asks to create a process, workflow, or "how to organize X", use PROPOSE_WORKFLOW with a logical list of steps.
-    - If user asks to complete a workflow step, you MUST use ASK_CONFIRMATION wrapping COMPLETE_STEP.
-    - Response MUST be ONLY the JSON object. Do not add markdown blocks like \`\`\`json.
-    `;
-
-    const config: any = {
-         systemInstruction: systemPrompt
-    };
-
-    // Configure Thinking Mode
-    if (mode === 'thinking') {
-        config.thinkingConfig = { thinkingBudget: 32768 };
-        // IMPORTANT: When using thinkingConfig, we CANNOT force responseMimeType to 'application/json' 
-        // in some contexts because the thought trace is text. The prompt handles the JSON structure.
-        // Also, maxOutputTokens must NOT be set.
-    } else {
-        // Standard Mode
-        config.responseMimeType = "application/json";
-        config.maxOutputTokens = 8192;
-    }
-
     const chat = ai.chats.create({
       model: modelName, 
       history: validHistory,
@@ -155,8 +159,29 @@ export const chatWithMaya = async (
 
   } catch (error: any) {
     console.error("Chat Error Details:", error);
+    
+    // Fallback strategy for Thinking Mode errors (often beta instability or timeouts)
+    if (mode === 'thinking') {
+        console.log("⚠️ Thinking mode failed. Falling back to Flash model.");
+        try {
+            const fallbackChat = ai.chats.create({
+                model: 'gemini-3-flash-preview',
+                history: validHistory,
+                config: {
+                    systemInstruction: systemPrompt,
+                    responseMimeType: "application/json",
+                    maxOutputTokens: 8192
+                }
+            });
+            const fallbackResult = await fallbackChat.sendMessage({ message });
+            return fallbackResult.text;
+        } catch (fallbackError) {
+            console.error("Fallback also failed:", fallbackError);
+        }
+    }
+
     return JSON.stringify({
-        message: "Desculpe, tive um erro de conexão. Tente novamente.",
+        message: "Desculpe, tive um erro de conexão com a IA. Tente novamente.",
         actions: []
     });
   }

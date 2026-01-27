@@ -25,7 +25,8 @@ export function buildIAContext(
   );
 
   const contextData: any = {
-    currentDate: now.toISOString(),
+    // FIX: Send local time string instead of UTC ISO to avoid timezone confusion (e.g. 17:00 UTC vs 14:00 BRT)
+    currentDate: format(now, "yyyy-MM-dd'T'HH:mm:ss"), 
     contextMode: team ? 'TEAM_MODE' : 'PERSONAL_MODE',
     userRole: role || 'member',
     userState: {
