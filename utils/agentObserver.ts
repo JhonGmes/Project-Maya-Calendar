@@ -1,5 +1,5 @@
 
-import { Task, AgentSuggestion, IAHistoryItem, FocusSession } from '../types';
+import { Task, AgentSuggestion, IAHistoryItem, FocusSession, UserProfile, CalendarEvent } from '../types';
 import { isPast, isToday, addDays, setHours, setMinutes, differenceInMinutes, getHours } from 'date-fns';
 import { detectBurnout } from './burnoutDetector';
 import { generateDailySummary } from './dailySummary';
@@ -10,13 +10,113 @@ import { generateDailySummary } from './dailySummary';
  */
 export function observeState(
     tasks: Task[], 
+    events: CalendarEvent[], // Added events to context
     history: IAHistoryItem[] = [], 
     currentScore: number = 50,
     focusSession?: FocusSession,
-    scoreHistoryDates: Date[] = [] // Added for summary generation
+    scoreHistoryDates: Date[] = [],
+    profile?: UserProfile | null
 ): AgentSuggestion | null {
     
-    // 0. Coaching de Foco (Prioridade Máxima se ativo)
+    // --- 0. NEGOCIAÇÃO DE AGENDA (Prioridade Crítica) ---
+    // Verifica se o dia de hoje tem > 8h planejadas
+    const todayEvents = events.filter(e => isToday(new Date(e.start)));
+    const totalMinutes = todayEvents.reduce((acc, e) => acc + differenceInMinutes(new Date(e.end), new Date(e.start)), 0);
+    
+    // Se carga > 9h (540 min), ativa negociação
+    if (totalMinutes > 540) {
+        // Evita sugerir se já sugeriu hoje (simulado)
+        const hasNegotiated = history.some(h => 
+            h.action.type === 'REORGANIZE_WEEK' && isToday(new Date(h.timestamp))
+        );
+
+        if (!hasNegotiated) {
+            return {
+                id: 'negotiate_overload_day',
+                type: 'warning',
+                message: `Seu dia está com ${Math.round(totalMinutes/60)}h de carga. Isso é insustentável. Posso negociar sua agenda?`,
+                actionLabel: 'Negociar',
+                actionData: {
+                    type: "NEGOTIATE_DEADLINE", // Reusing generic negotiation type
+                    payload: {
+                        taskTitle: "Agenda do Dia",
+                        reason: "Carga horária excede o limite saudável de 8h.",
+                        options: [
+                            {
+                                label: "Mover últimas reuniões para amanhã",
+                                style: 'primary',
+                                action: {
+                                    type: "REORGANIZE_WEEK",
+                                    payload: { changes: [], reason: "Mover excedente do dia" } // Backend resolves logic
+                                }
+                            },
+                            {
+                                label: "Manter, mas alertar sobre foco",
+                                style: 'secondary',
+                                action: { type: "NO_ACTION" }
+                            }
+                        ]
+                    }
+                }
+            };
+        }
+    }
+
+    // --- 0. ONBOARDING & WELCOME (Alta Prioridade) ---
+    if (profile && (!profile.onboardingStage || profile.onboardingStage === 'new')) {
+        // Welcome Logic
+        if (events.length === 0 && tasks.length === 0) {
+            return {
+                id: 'onboarding_welcome',
+                type: 'onboarding',
+                message: `Olá, ${profile.name.split(' ')[0]}! Bem-vindo à Maya. Estou aqui para organizar seu tempo. Que tal começarmos criando seu primeiro evento?`,
+                actionLabel: 'Criar Evento',
+                actionData: {
+                    type: "CREATE_EVENT",
+                    payload: {
+                        title: "Planejamento Inicial",
+                        start: new Date().toISOString(), // Agora
+                        category: "routine"
+                    }
+                }
+            };
+        } else if (events.length > 0) {
+            // Advance onboarding
+            return {
+                id: 'onboarding_first_done',
+                type: 'onboarding',
+                message: "Ótimo começo! Notei que você já tem eventos. Posso analisar sua rotina e sugerir melhorias?",
+                actionLabel: "Analisar Agora",
+                actionData: {
+                    type: "UPDATE_PROFILE", // Trick to update onboarding stage
+                    payload: { data: { onboardingStage: 'first_event_created' } }
+                }
+            };
+        }
+    }
+
+    // --- BEHAVIORAL ONBOARDING (Dicas contextuais) ---
+    // Exemplo: Eventos muito longos (> 4 horas)
+    const veryLongEvents = events.filter(e => {
+        const duration = differenceInMinutes(new Date(e.end), new Date(e.start));
+        return duration > 240 && isToday(new Date(e.start));
+    });
+
+    if (veryLongEvents.length > 0) {
+        const longEvent = veryLongEvents[0];
+        
+        if (Math.random() > 0.7) { 
+            return {
+                id: `tip_long_event_${longEvent.id}`,
+                type: 'optimization',
+                message: `O evento "${longEvent.title}" é bem longo (+4h). Que tal quebrar em blocos com pausas para manter o foco?`,
+                actionLabel: 'Entendido',
+                actionData: { type: "NO_ACTION" }
+            };
+        }
+    }
+
+    // --- 1. Coaching de Foco (Prioridade Alta se ativo) ---
     if (focusSession && focusSession.isActive && focusSession.startTime) {
         const elapsed = differenceInMinutes(new Date(), new Date(focusSession.startTime));
         const planned = focusSession.plannedDuration || 25;
@@ -37,11 +137,9 @@ export function observeState(
         return null;
     }
 
-    // NEW: DAILY SUMMARY TRIGGER (Final do dia, após 17h, se houver atividade)
+    // --- 2. DAILY SUMMARY TRIGGER (Final do dia, após 17h) ---
     const currentHour = getHours(new Date());
     if (currentHour >= 17) {
-        // Check if we already showed summary today
-        // Simple heuristic: check history for SHOW_SUMMARY action today
         const hasShownSummary = history.some(h => 
             h.action.type === 'SHOW_SUMMARY' && 
             isToday(new Date(h.timestamp))
@@ -65,7 +163,7 @@ export function observeState(
         }
     }
 
-    // 1. Verificação de BURNOUT
+    // --- 3. Verificação de BURNOUT ---
     const burnout = detectBurnout(tasks, history, currentScore);
     
     if (burnout.level === 'high') {
@@ -88,66 +186,6 @@ export function observeState(
                 }
             }
         };
-    }
-
-    const pendingTasks = tasks.filter(t => !t.completed);
-    const overdueTasks = pendingTasks.filter(t => t.dueDate && isPast(new Date(t.dueDate)) && !isToday(new Date(t.dueDate)));
-    
-    // 2. Detecção de Atrasos Críticos
-    if (overdueTasks.length >= 3) {
-        return {
-            id: 'overdue_batch',
-            type: 'warning',
-            message: `Você tem ${overdueTasks.length} tarefas atrasadas. Quer que eu mova todas para amanhã de manhã?`,
-            actionLabel: 'Reagendar Atrasadas',
-            actionData: {
-                type: "ASK_CONFIRMATION",
-                payload: {
-                    message: `Confirma mover ${overdueTasks.length} tarefas para amanhã às 09:00?`,
-                    action: {
-                        type: "RESCHEDULE_TASK",
-                        payload: {
-                            taskIds: overdueTasks.map(t => t.id),
-                            newDate: setMinutes(setHours(addDays(new Date(), 1), 9), 0).toISOString()
-                        }
-                    }
-                }
-            }
-        };
-    }
-
-    // 3. Análise de Padrão: Horário de Pico
-    const completedTasks = tasks.filter(t => t.completed && t.dueDate);
-    if (completedTasks.length > 5 && pendingTasks.filter(t => !t.dueDate).length > 2) {
-        const hourCounts: Record<number, number> = {};
-        completedTasks.forEach(t => {
-            const h = new Date(t.dueDate!).getHours();
-            hourCounts[h] = (hourCounts[h] || 0) + 1;
-        });
-        
-        const bestHourEntry = Object.entries(hourCounts).sort((a,b) => b[1] - a[1])[0];
-        if (bestHourEntry) {
-            const hour = parseInt(bestHourEntry[0]);
-            return {
-                id: 'pattern_scheduler',
-                type: 'pattern',
-                message: `Notei que você é mais produtivo por volta das ${hour}h. Quer agendar tarefas sem prazo para esse horário?`,
-                actionLabel: `Agendar para ${hour}h`,
-                actionData: {
-                    type: "ASK_CONFIRMATION",
-                    payload: {
-                        message: `Posso definir o prazo dessas tarefas para amanhã às ${hour}:00?`,
-                        action: {
-                            type: "RESCHEDULE_TASK",
-                            payload: {
-                                taskIds: pendingTasks.filter(t => !t.dueDate).map(t => t.id),
-                                newDate: setMinutes(setHours(addDays(new Date(), 1), hour), 0).toISOString()
-                            }
-                        }
-                    }
-                }
-            };
-        }
     }
 
     return null;

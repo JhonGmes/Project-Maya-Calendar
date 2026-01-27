@@ -6,6 +6,7 @@ import { parseIAResponse } from '../utils/iaActionEngine';
 import { adaptTone } from '../utils/personalityEngine';
 import { CalendarEvent, Task, NegotiationOption } from '../types';
 import { useApp } from '../context/AppContext';
+import { useDebounce } from '../hooks/useDebounce';
 
 interface MayaModalProps {
   isOpen: boolean;
@@ -40,6 +41,23 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
         textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
   }, [input]);
+
+  // --- DEBOUNCE LOGIC FOR INTENT ANALYSIS ---
+  const analyzeIntent = useDebounce((text: string) => {
+      // Simulação: Aqui conectaríamos com o IAActionEngine para pré-processar intenção
+      // Ex: Se usuário digita "Reagendar...", a IA já prepara o contexto de calendário
+      if (text.length > 5) {
+          console.log("Analyzing intent for:", text);
+          // dispatch({ type: "USER_TYPING", payload: text });
+      }
+  }, 600);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const val = e.target.value;
+      setInput(val);
+      analyzeIntent(val);
+  };
+  // -------------------------------------------
 
   const sendAIMessage = (text: string, type: 'text' | 'image' | 'audio' | 'video' = 'text', content?: string) => {
       const adaptedText = type === 'text' ? adaptTone(text, personality) : text;
@@ -509,7 +527,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                     <textarea 
                         ref={textareaRef}
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
+                        onChange={handleInputChange} // UPDATED TO USE DEBOUNCED HANDLER
                         onKeyDown={handleKeyDown}
                         placeholder={pendingAction ? "Responda Sim ou Não..." : (selectedImage ? "O que fazer com a imagem?" : selectedVideo ? "Pergunte sobre o vídeo..." : "Mensagem ou comando...")}
                         rows={1}

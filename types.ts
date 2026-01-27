@@ -125,6 +125,8 @@ export interface UserUsage {
     lastUsageReset: string; // ISO Date
 }
 
+export type OnboardingStage = 'new' | 'first_event_created' | 'organized' | 'expert';
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -140,7 +142,8 @@ export interface UserProfile {
   theme: 'light' | 'dark';
   notifications: boolean;
   defaultReminder: number;
-  plan: PlanType; // New
+  plan: PlanType;
+  onboardingStage?: OnboardingStage; // New for AI Context
 }
 
 export interface Company {
@@ -403,6 +406,12 @@ export type IAAction =
       };
     }
   | {
+      type: "UPDATE_PROFILE"; // Used for Onboarding updates
+      payload: {
+          data: Partial<UserProfile>
+      }
+  }
+  | {
       type: "NO_ACTION";
     };
 
@@ -446,7 +455,7 @@ export type PersonalityType = "disciplinado" | "sobrecarregado" | "neutro";
 
 export interface AgentSuggestion {
     id: string;
-    type: 'optimization' | 'warning' | 'pattern' | 'focus_coach' | 'daily_summary' | 'workflow_step';
+    type: 'optimization' | 'warning' | 'pattern' | 'focus_coach' | 'daily_summary' | 'workflow_step' | 'onboarding';
     message: string;
     actionLabel: string;
     actionData: IAAction;
