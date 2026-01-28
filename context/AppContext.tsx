@@ -7,9 +7,8 @@ import { ToastMessage } from "../components/Toast";
 import { calculateProductivityScore } from "../utils/productivityScore";
 import { getDailyFocus } from "../utils/dailyFocus";
 import { detectPersonality } from "../utils/personalityEngine"; 
-import { generateWeeklyReport as generateStaticReport } from "../utils/weeklyReport"; 
 import { useAuth } from "./AuthContext";
-import { IAActionEngine as DecisionEngine } from "../utils/decisionEngine"; // Renamed to avoid conflict
+import { IAActionEngine as DecisionEngine } from "../utils/decisionEngine";
 import { generateDailySummary } from "../utils/dailySummary";
 import { isToday, getHours } from "date-fns";
 import { WorkflowEngine } from "../utils/workflowEngine";
@@ -19,7 +18,6 @@ import { checkAILimit, checkWorkflowLimit } from "../utils/plans";
 import { parseIAResponse } from "../utils/iaActionEngine";
 import { chatWithMaya } from "../services/geminiService";
 
-// --- NEW ARCHITECTURE IMPORTS ---
 import { IAActionEngine } from "../engine/IAActionEngine";
 import { AppState, initialState } from "../types/appState";
 import { AppAction } from "../types/actions";
@@ -27,14 +25,9 @@ import { TaskUseCases } from "../useCases/taskUseCases";
 
 type Screen = ViewMode | "login" | "settings";
 
-type IAStatus =
-  | "idle"
-  | "thinking"
-  | "executing"
-  | "waiting_user";
+type IAStatus = "idle" | "thinking" | "executing" | "waiting_user";
 
 export interface AppContextData {
-  // Navigation & UI
   screen: Screen;
   setScreen: (screen: Screen) => void;
   isMayaOpen: boolean;
@@ -45,11 +38,8 @@ export interface AppContextData {
   setNotificationsOpen: (open: boolean) => void;
   toasts: ToastMessage[];
   addToast: (toast: ToastMessage) => void;
-
-  // Data (Managed by Reducer or Hybrid)
   events: CalendarEvent[];
-  dispatch: (action: AppAction) => void; // Exposed for Trigger Layer
-  
+  dispatch: (action: AppAction) => void;
   tasks: Task[];
   addTask: (title: string, dueDate?: Date) => Promise<void>; 
   addWorkflow: (title: string, steps: string[]) => Promise<void>; 
@@ -59,23 +49,15 @@ export interface AppContextData {
   templates: WorkflowTemplate[]; 
   workflowLogs: WorkflowLog[]; 
   updateTask: (task: Task) => Promise<void>;
-  
-  // Legacy Wrapper for Events (for backward compatibility)
   addEvent: (event: Partial<CalendarEvent>) => Promise<void>;
-  
-  // Profile
   profile: UserProfile | null;
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
   aiUsage: UserUsage | null; 
-
-  // Teams & Permissions
   teams: Team[];
   currentTeam: Team | null;
   userRole: UserRole;
   switchTeam: (teamId: string | null) => Promise<void>;
   canEditWorkflow: boolean;
-
-  // AI State
   iaStatus: IAStatus;
   setIaStatus: (status: IAStatus) => void;
   messages: IAMessage[];
@@ -88,19 +70,13 @@ export interface AppContextData {
   agentSuggestion: AgentSuggestion | null;
   setAgentSuggestion: (suggestion: AgentSuggestion | null) => void;
   personality: PersonalityType;
-  
-  // System Decision Engine
   systemDecision: SystemDecision;
-
-  // Productivity
   productivityScore: number;
   scoreBreakdown: ScoreBreakdown;
   scoreHistory: ScoreHistory[];
   dailyFocus: Task | null;
   focusSession: FocusSession;
   endFocusSession: (completed: boolean) => void;
-
-  // Notifications
   notifications: Notification[];
   unreadNotifications: number;
   markNotificationAsRead: (id: string) => Promise<void>;
@@ -114,45 +90,27 @@ const AppContext = createContext<AppContextData>({} as AppContextData);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user, isLocalMode } = useAuth();
-
-  // --- GLOBAL STATE (S Layer) ---
   const [state, dispatch] = useReducer(IAActionEngine, initialState);
 
-  // UI State
   const [screen, setScreen] = useState<Screen>("day");
   const [isMayaOpen, setMayaOpen] = useState(false);
   const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-
-  // Legacy Data State (Gradual Migration)
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  
-  // Events are now managed by Reducer 'state.events'
-  // AgentSuggestion is now managed by Reducer 'state.agentSuggestion'
-
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowLogs, setWorkflowLogs] = useState<WorkflowLog[]>([]);
   const [aiUsage, setAiUsage] = useState<UserUsage | null>(null);
-  
-  // Score State
   const [productivityScore, setProductivityScore] = useState(0);
   const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown>({ focusPoints: 0, taskPoints: 0, consistencyBonus: 0, penalties: 0, total: 0, streakDays: 0, iaBonus: 0, completedTasksCount: 0, focusSessionsCount: 0, iaAcceptanceRate: 0 });
   const [scoreHistory, setScoreHistory] = useState<ScoreHistory[]>([]);
-  
   const [dailyFocus, setDailyFocus] = useState<Task | null>(null);
-
-  // Teams State
   const [teams, setTeams] = useState<Team[]>([]);
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('member');
-
-  // Notifications
   const [notifications, setNotifications] = useState<Notification[]>([]);
-
-  // AI State
   const [iaStatus, setIaStatus] = useState<IAStatus>("idle");
   const [messages, setMessages] = useState<IAMessage[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingActionState | null>(null); 
@@ -160,15 +118,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [personality, setPersonality] = useState<PersonalityType>("neutro");
   const [focusSession, setFocusSession] = useState<FocusSession>({ isActive: false, taskId: null, startTime: null, plannedDuration: 25 });
   const [systemDecision, setSystemDecision] = useState<SystemDecision>({ type: 'NONE' });
-
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(true);
 
-  // Wrapper for setAgentSuggestion to update Reducer state
   const setAgentSuggestion = (suggestion: AgentSuggestion | null) => {
       dispatch({ type: "SET_SUGGESTION", payload: suggestion });
   };
 
-  // --- 1. Load Data ---
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -183,25 +138,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             StorageService.getWorkflowLogs()
         ]);
         
-        // Hydrate Reducer
         dispatch({ type: "SET_EVENTS", payload: loadedEvents });
-
         setAllTasks(loadedTasks);
         
-        // Profile Synchronization with Auth
         let finalProfile = loadedProfile;
         if (user && (loadedProfile.id === 'user-local' || loadedProfile.email !== user.email)) {
-             // If we have a real user but profile is local/default or email mismatch, sync it
              finalProfile = {
                  ...loadedProfile,
                  id: user.id,
                  email: user.email || '',
                  name: loadedProfile.name !== 'Convidado Local' ? loadedProfile.name : (user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário')
              };
-             // Optional: persist this update immediately if needed, but saving on edit is usually safer
         }
         setProfile(finalProfile);
-
         setScoreHistory(loadedHistory);
         setTeams(loadedTeams);
         setNotifications(loadedNotifs);
@@ -234,7 +183,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setFocusSession(storedSession);
         
         if (finalProfile.theme === 'dark') document.documentElement.classList.add('dark');
-        
         setDailyFocus(getDailyFocus(personalTasks));
         setPersonality(detectPersonality(personalTasks));
         
@@ -249,23 +197,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [user, isLocalMode]);
 
-  // --- 2. IA ACTION ENGINE LOOP ---
   useEffect(() => {
       if (tasks.length === 0) return;
-
       const scoreDates = scoreHistory.map(h => new Date(h.createdAt));
       const focusDoneToday = iaHistory.some(h => 
           h.action.type === 'END_FOCUS' && isToday(new Date(h.timestamp))
       );
-      
       let dailySummary = null;
       if (getHours(new Date()) >= 17) {
            dailySummary = generateDailySummary(tasks, iaHistory, scoreDates);
       }
-      
       const nextTask = tasks.filter(t => !t.completed).sort((a,b) => (a.priority === 'high' ? -1 : 1))[0];
-
-      // Run Decision Engine
       const decision = DecisionEngine.decide({
           hasActiveFocus: focusSession.isActive,
           focusDoneToday,
@@ -274,10 +216,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           dailySummary,
           scoreBreakdown
       });
-
       setSystemDecision(decision);
-
-      // Check for Burnout
       const burnoutAnalysis = detectBurnout(tasks, iaHistory, productivityScore);
       if (burnoutAnalysis.level === 'high' && !state.agentSuggestion) {
           setAgentSuggestion({
@@ -291,13 +230,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               }
           });
       }
-
       if (decision.type === 'SUGGEST_NEXT_STEP') {
           const recentSuggestion = iaHistory.slice(-5).find(h => 
               h.action.type === 'NO_ACTION' && 
               Date.now() - new Date(h.timestamp).getTime() < 10 * 60 * 1000
           );
-          
           if (!recentSuggestion && !state.agentSuggestion) {
                setAgentSuggestion({
                    id: `next-step-${decision.payload.step.id}`,
@@ -315,38 +252,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                });
           }
       }
-
   }, [tasks, iaHistory, focusSession, scoreBreakdown, productivityScore]);
 
   const switchTeam = async (teamId: string | null) => {
       const selected = teams.find(t => t.id === teamId) || null;
       setCurrentTeam(selected);
-      
       if (selected) {
          setUserRole(selected.ownerId === user?.id ? 'manager' : 'member');
       } else {
          setUserRole('member');
       }
-
       const filtered = teamId 
         ? allTasks.filter(t => t.teamId === teamId)
         : allTasks.filter(t => !t.teamId);
-      
       setTasks(sortTasksByDeadline(filtered));
       setDailyFocus(getDailyFocus(filtered));
-      
-      addToast({ 
-          id: Date.now().toString(), 
-          title: "Mudança de Contexto", 
-          message: selected ? `Equipe: ${selected.name}` : "Modo Pessoal", 
-          type: "info" 
-      });
+      addToast({ id: Date.now().toString(), title: "Mudança de Contexto", message: selected ? `Equipe: ${selected.name}` : "Modo Pessoal", type: "info" });
   };
 
   useEffect(() => {
       if (iaHistory.length > 0) {
           localStorage.setItem('maya_ia_history', JSON.stringify(iaHistory.slice(-50))); 
-          
           const scoreDates = scoreHistory.map(h => new Date(h.createdAt));
           const fullScore = calculateProductivityScore(tasks, iaHistory, scoreDates);
           setProductivityScore(fullScore.score);
@@ -357,9 +283,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
       StorageService.saveFocusSession(focusSession);
   }, [focusSession]);
-
-
-  // --- WRAPPERS & TRIGGERS ---
 
   const addToast = (toast: ToastMessage) => {
     setToasts(prev => [...prev, toast]);
@@ -376,12 +299,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const addTask = async (title: string, dueDate?: Date) => {
       if (!user && !isLocalMode) return;
-      const newTask = TaskUseCases.create(
-          title, 
-          dueDate, 
-          currentTeam?.id, 
-          StorageService.generateId
-      );
+      const newTask = TaskUseCases.create(title, dueDate, currentTeam?.id, StorageService.generateId);
       const saved = await StorageService.saveTask(newTask);
       setAllTasks(prev => [...prev, saved]);
       setTasks(prev => sortTasksByDeadline([...prev, saved]));
@@ -390,12 +308,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const addWorkflow = async (title: string, steps: string[]) => {
     if (!user && !isLocalMode) return;
-    
     if (currentTeam && !Permissions.canEditWorkflow(userRole)) {
         addToast({ id: Date.now().toString(), title: "Permissão Negada", message: "Apenas gerentes podem criar fluxos.", type: "error" });
         return;
     }
-
     if (profile && aiUsage) {
         if (!checkWorkflowLimit(profile.plan, aiUsage.workflowsCount)) {
             addToast({ id: Date.now().toString(), title: "Limite do Plano", message: `Upgrade necessário para criar mais fluxos.`, type: "error" });
@@ -405,33 +321,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         StorageService.saveUsage(newUsage);
         setAiUsage(newUsage);
     }
-
     const stepsData = steps.map(s => ({ title: s }));
     const workflow = WorkflowEngine.createTemplate(title, stepsData);
     workflow.ownerId = user?.id; 
-
     const newTask = TaskUseCases.create(title, undefined, currentTeam?.id, StorageService.generateId);
     newTask.workflow = workflow;
-    
     const saved = await StorageService.saveTask(newTask);
     setAllTasks(prev => [...prev, saved]);
     setTasks(prev => sortTasksByDeadline([...prev, saved]));
-    
     addToast({ id: Date.now().toString(), title: "Fluxo Criado", message: "Novo processo iniciado.", type: "success" });
   };
 
   const advanceWorkflow = async (task: Task, stepId: string) => {
       if (!task.workflow) return;
-
       const updatedWorkflow = WorkflowEngine.completeStep(task.workflow, stepId);
-      
       const updatedTask = TaskUseCases.update(task, {
           workflow: updatedWorkflow,
           completed: updatedWorkflow.status === 'completed'
       });
-
       await updateTask(updatedTask);
-
       const logEntry: WorkflowLog = {
           id: StorageService.generateId(),
           workflowId: updatedWorkflow.id,
@@ -441,7 +349,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           action: 'completed',
           timestamp: new Date().toISOString()
       };
-      
       await StorageService.saveWorkflowLog(logEntry);
       setWorkflowLogs(prev => [logEntry, ...prev]);
   };
@@ -474,10 +381,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
   };
 
-  // --- TRIGGER: ADD EVENT (Wraps Dispatch + Persistence) ---
   const addEvent = async (eventData: Partial<CalendarEvent>) => {
       if (!user && !isLocalMode) return;
-      
       const newEvent: CalendarEvent = {
           id: eventData.id || StorageService.generateId(),
           title: eventData.title || "Novo Evento",
@@ -490,11 +395,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           description: eventData.description,
           location: eventData.location
       };
-
-      // 1. Dispatch (Update UI State)
       dispatch({ type: "CREATE_EVENT", payload: newEvent });
-
-      // 2. Persist (Side Effect)
       await StorageService.saveEvent(newEvent);
   };
 
@@ -504,11 +405,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const generateReport = async () => {
       setMayaOpen(true);
-      // User trigger message for context
       addMessage({ id: Date.now().toString(), sender: 'user', text: "📊 Gerar Relatório Semanal de Produtividade" });
-      
       setIaStatus('thinking');
-
       try {
           const prompt = `
           Atue como Maya, uma coach de produtividade sênior.
@@ -521,42 +419,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           
           ESTRUTURA DO RELATÓRIO (Markdown):
           # Relatório Semanal Maya
-          
           ## 🏆 Veredito
           [Uma frase de impacto sobre o desempenho]
-
           ## 📈 Análise de Dados
           [Interprete o score e a consistência]
-
           ## ⚠️ Pontos de Atenção
           [Identifique gargalos ou riscos de burnout]
-
           ## 🚀 Plano para Próxima Semana
           [3 ações práticas]
-
           Use um tom profissional, analítico, mas encorajador.
           Retorne no formato JSON padrão: { "message": "SEU_RELATORIO_MARKDOWN", "actions": [] }
           `;
-
           const rawResponse = await chatWithMaya(
               prompt, 
               [], 
               'thinking', 
               { tasks, events: state.events, history: iaHistory, currentTeam, userRole }
           );
-
           const parsed = parseIAResponse(rawResponse);
-          
-          // Send as specific 'report' type to trigger download button UI
           addMessage({ 
               id: Date.now().toString(), 
               sender: 'maya', 
               text: parsed.message,
               type: 'report' 
           });
-          
           StorageService.saveNotification("Relatório Semanal Inteligente disponível.");
-
       } catch (err) {
           console.error("Erro ao gerar relatório:", err);
           addMessage({ id: Date.now().toString(), sender: 'maya', text: "Desculpe, não consegui processar seu relatório agora. Tente novamente em instantes." });
@@ -608,7 +495,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const cancelIAAction = async () => {
       if (!pendingAction) return;
       const { originalAction } = pendingAction;
-      
       if (originalAction.type === 'COMPLETE_STEP') {
           const { taskId, stepId } = originalAction.payload;
           const task = tasks.find(t => t.id === taskId);
@@ -620,10 +506,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                   timestamp: new Date().toISOString(),
                   details: `Step ${stepId} cancelled by user`
               };
-              const updatedWf = {
-                  ...task.workflow,
-                  iaHistory: [...(task.workflow.iaHistory || []), newHistoryItem]
-              };
+              const updatedWf = { ...task.workflow, iaHistory: [...(task.workflow.iaHistory || []), newHistoryItem] };
               const updatedTask = { ...task, workflow: updatedWf };
               await updateTask(updatedTask);
           }
@@ -633,15 +516,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const executeIAAction = async (action: IAAction, source: "user" | "ai" = "ai") => {
-    
     if (source === 'ai' && profile && aiUsage) {
         const limitCheck = checkAILimit(profile.plan, aiUsage);
         if (!limitCheck.allowed) {
-            addMessage({ 
-                id: Date.now().toString(), 
-                sender: 'maya', 
-                text: `🔒 Limite diário de sugestões atingido no plano ${profile.plan}. Atualize para continuar recebendo ajuda da IA hoje.` 
-            });
+            addMessage({ id: Date.now().toString(), sender: 'maya', text: `🔒 Limite diário de sugestões atingido no plano ${profile.plan}. Atualize para continuar recebendo ajuda da IA hoje.` });
             return;
         }
         const newUsage = { ...aiUsage, aiSuggestionsToday: aiUsage.aiSuggestionsToday + 1 };
@@ -650,10 +528,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     if (action.type !== 'NEGOTIATE_DEADLINE' && action.type !== 'ASK_CONFIRMATION' && action.type !== 'SHOW_SUMMARY') {
-        setIaHistory(prev => [
-            ...prev, 
-            { timestamp: new Date().toISOString(), action, source }
-        ]);
+        setIaHistory(prev => [...prev, { timestamp: new Date().toISOString(), action, source }]);
     }
 
     switch (action.type) {
@@ -673,12 +548,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const { eventId, start, end } = action.payload;
             const targetEvent = state.events.find(e => e.id === eventId);
             if (targetEvent) {
-                // Dispatch locally
-                dispatch({ 
-                    type: "MOVE_EVENT", 
-                    payload: { eventId, newStart: new Date(start), newEnd: new Date(end) } 
-                });
-                // Persist
+                dispatch({ type: "MOVE_EVENT", payload: { eventId, newStart: new Date(start), newEnd: new Date(end) } });
                 await StorageService.saveEvent({ ...targetEvent, start: new Date(start), end: new Date(end) });
                 addToast({ id: Date.now().toString(), title: "Evento Atualizado", message: "Horário ajustado com sucesso.", type: "success" });
             }
@@ -696,20 +566,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (changes) {
                 for (const change of changes) {
                     const task = tasks.find(t => t.id === change.taskId);
-                    if (task) {
-                        await updateTask({ ...task, dueDate: new Date(change.to) });
-                    }
+                    if (task) await updateTask({ ...task, dueDate: new Date(change.to) });
                 }
                 addToast({ id: Date.now().toString(), title: "Reorganizado", message: "Semana ajustada com sucesso.", type: "success" });
+            }
+            break;
+        case "REORGANIZE_CALENDAR":
+            const plan = action.payload.plan;
+            if (plan && plan.length > 0) {
+                const updatedEvents: CalendarEvent[] = [];
+                for (const item of plan) {
+                    const original = state.events.find(e => e.id === item.originalEventId);
+                    if (original) {
+                        const newEvt = { 
+                            ...original, 
+                            start: new Date(item.newStart), 
+                            end: new Date(item.newEnd) 
+                        };
+                        updatedEvents.push(newEvt);
+                        await StorageService.saveEvent(newEvt); 
+                    }
+                }
+                dispatch({ type: "APPLY_BULK_UPDATE", payload: updatedEvents });
+                addToast({ id: Date.now().toString(), title: "Agenda Otimizada", message: `${plan.length} eventos realocados.`, type: "success" });
             }
             break;
         case "COMPLETE_STEP": 
              const { taskId: tId, stepId } = action.payload;
              const targetTask = tasks.find(t => t.id === tId);
-             
              if (targetTask && targetTask.workflow) {
                  await advanceWorkflow(targetTask, stepId);
-                 
                  if (source === 'ai') {
                      const newHistoryItem: IAActionHistory = {
                          id: StorageService.generateId(),
@@ -718,45 +604,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                          timestamp: new Date().toISOString(),
                          details: `Step ${stepId} completed via AI`
                      };
-                     
-                     const updatedWf = {
-                         ...targetTask.workflow,
-                         iaHistory: [...(targetTask.workflow.iaHistory || []), newHistoryItem]
-                     };
-                     
-                     const taskWithHistory = {
-                         ...targetTask, 
-                         workflow: {
-                             ...updatedWf
-                         }
-                     };
+                     const updatedWf = { ...targetTask.workflow, iaHistory: [...(targetTask.workflow.iaHistory || []), newHistoryItem] };
+                     const taskWithHistory = { ...targetTask, workflow: updatedWf };
                      await updateTask(taskWithHistory);
                  }
-
                  addToast({ id: Date.now().toString(), title: "Etapa Concluída", message: "Avanço registrado via IA.", type: "success" });
              }
              break;
-        case "CHANGE_SCREEN":
-             setScreen(action.payload);
-             break;
-        case "START_FOCUS":
-             startFocusSession(action.payload.taskId, action.payload.duration);
-             break;
-        case "END_FOCUS":
-             endFocusSession(action.payload.completed);
-             break;
-        case "ASK_CONFIRMATION":
-             setPendingAction({ originalAction: action.payload.action, question: action.payload.message });
-             break;
-        case "NEGOTIATE_DEADLINE":
-             setPendingAction({ originalAction: action, question: "Negociação de Prazo" });
-             break;
+        case "CHANGE_SCREEN": setScreen(action.payload); break;
+        case "START_FOCUS": startFocusSession(action.payload.taskId, action.payload.duration); break;
+        case "END_FOCUS": endFocusSession(action.payload.completed); break;
+        case "ASK_CONFIRMATION": setPendingAction({ originalAction: action.payload.action, question: action.payload.message }); break;
+        case "NEGOTIATE_DEADLINE": setPendingAction({ originalAction: action, question: "Negociação de Prazo" }); break;
         case "SHOW_SUMMARY":
-             addMessage({ 
-                 id: Date.now().toString(), 
-                 sender: 'maya', 
-                 text: `📊 **Resumo do Dia**\nScore: ${action.payload.score}\n\n${action.payload.message}\n\n*${action.payload.suggestionForTomorrow}*`
-             });
+             addMessage({ id: Date.now().toString(), sender: 'maya', text: `📊 **Resumo do Dia**\nScore: ${action.payload.score}\n\n${action.payload.message}\n\n*${action.payload.suggestionForTomorrow}*` });
              setMayaOpen(true);
              break;
         case "PROPOSE_WORKFLOW":
@@ -769,19 +630,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              StorageService.saveNotification(`Relatório Semanal enviado para ${profile?.email}`);
              addToast({ id: Date.now().toString(), title: "Relatório Enviado", message: "Verifique seu email.", type: "success" });
              break;
-        case "REPLY":
-             addMessage({ id: Date.now().toString(), sender: 'maya', text: action.payload.message });
-             break;
+        case "REPLY": addMessage({ id: Date.now().toString(), sender: 'maya', text: action.payload.message }); break;
         default: break;
     }
   };
 
   const executeIAActionExpanded = async (action: IAAction, source: "user" | "ai" = "ai") => {
+      // Handles the PROPOSE_WORKFLOW execution when user clicks "Confirm"
       if (action.type === 'PROPOSE_WORKFLOW') {
           await addWorkflow(action.payload.title, action.payload.steps);
           return;
       }
-      
       await executeIAAction(action, source);
   };
 
@@ -794,26 +653,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isNotificationsOpen, setNotificationsOpen,
         toasts, addToast,
         profile, updateProfile, aiUsage,
-        events: state.events, dispatch, // Exposed S & T
+        events: state.events, dispatch,
         tasks, addTask, updateTask,
-        addWorkflow,
-        saveWorkflowAsTemplate,
-        createWorkflowFromTemplate,
-        advanceWorkflow,
-        templates,
-        workflowLogs,
-        addEvent,
+        addWorkflow, saveWorkflowAsTemplate, createWorkflowFromTemplate, advanceWorkflow,
+        templates, workflowLogs, addEvent,
         iaStatus, setIaStatus,
         messages, addMessage,
         pendingAction, setPendingAction,
         executeIAAction: executeIAActionExpanded, 
         cancelIAAction,
         iaHistory,
-        agentSuggestion: state.agentSuggestion, setAgentSuggestion, // Now linked to state
+        agentSuggestion: state.agentSuggestion, setAgentSuggestion,
         productivityScore, scoreBreakdown, scoreHistory, dailyFocus,
         notifications, unreadNotifications: notifications.filter(n => !n.read).length,
-        markNotificationAsRead,
-        clearAllNotifications,
+        markNotificationAsRead, clearAllNotifications,
         teams, currentTeam, switchTeam, userRole, 
         canEditWorkflow: Permissions.canEditWorkflow(userRole),
         personality,

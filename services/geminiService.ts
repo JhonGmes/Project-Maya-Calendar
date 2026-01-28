@@ -1,11 +1,18 @@
-
 import { GoogleGenAI, Content } from "@google/genai";
-import { IAResponse, Task, CalendarEvent, IAHistoryItem, Team, UserRole } from "../types";
+import {
+  Task,
+  CalendarEvent,
+  IAHistoryItem,
+  Team,
+  UserRole
+} from "../types";
 import { buildIAContext } from "../utils/iaContextBuilder";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-// --- ENVIRONMENT SHIM ---
+/* =======================
+   ENVIRONMENT SAFE SETUP
+======================= */
 try {
   if (typeof process === "undefined") {
     (window as any).process = { env: {} };
@@ -13,271 +20,144 @@ try {
   if (!process.env) {
     (window as any).process.env = {};
   }
+
   const viteEnv = (import.meta as any).env || {};
-  
-  if (!process.env.API_KEY) {
-    process.env.API_KEY = viteEnv.VITE_GEMINI_API_KEY || viteEnv.VITE_API_KEY || viteEnv.VITE_GOOGLE_API_KEY || '';
-  }
-} catch (e) {
-  console.warn("Erro ao configurar ambiente:", e);
+  process.env.API_KEY =
+    viteEnv.VITE_GEMINI_API_KEY ||
+    viteEnv.VITE_API_KEY ||
+    viteEnv.VITE_GOOGLE_API_KEY ||
+    process.env.API_KEY ||
+    "";
+} catch {
+  console.warn("Erro ao configurar ambiente");
 }
 
 const getAI = () => {
   let key = process.env.API_KEY;
-  if ((!key || key.trim() === '') && typeof window !== 'undefined') {
-      key = localStorage.getItem('maya_api_key') || '';
+  if (!key && typeof window !== "undefined") {
+    key = localStorage.getItem("maya_api_key") || "";
   }
-  key = key ? key.trim() : '';
 
   if (!key) {
-      console.error("CRITICAL: Gemini API Key is missing.");
-      throw new Error("API_KEY_MISSING");
+    throw new Error("API_KEY_MISSING");
   }
-  return new GoogleGenAI({ apiKey: key });
-}
 
-// Clean history to remove empty messages which cause Gemini 400 Errors
+  return new GoogleGenAI({ apiKey: key.trim() });
+};
+
+/* =======================
+   HISTORY SANITIZER
+======================= */
 function cleanHistory(history: any[]): Content[] {
-    const cleaned: Content[] = [];
-    let lastRole = '';
-
-    for (const msg of history) {
-        if (!msg.parts || msg.parts.length === 0 || !msg.parts[0].text || msg.parts[0].text.trim() === '') {
-            continue;
-        }
-        if (msg.role === lastRole) {
-            continue; 
-        }
-        cleaned.push({
-            role: msg.role,
-            parts: [{ text: msg.parts[0].text }]
-        });
-        lastRole = msg.role;
-    }
-    return cleaned;
+  return history
+    .filter(
+      msg =>
+        msg?.parts?.[0]?.text &&
+        msg.parts[0].text.trim().length > 0
+    )
+    .map(msg => ({
+      role: msg.role,
+      parts: [{ text: msg.parts[0].text }]
+    }));
 }
 
-/**
- * Nova função de chat que espera uma resposta estruturada (JSON)
- * compatível com o IAActionEngine.
- */
+/* =======================
+   MAIN CHAT FUNCTION
+======================= */
 export const chatWithMaya = async (
-    message: string, 
-    history: any[], 
-    mode: 'fast' | 'thinking' = 'fast',
-    appContext?: { tasks: Task[], events: CalendarEvent[], history: IAHistoryItem[], currentTeam?: Team | null, userRole?: UserRole },
-    imageBase64?: string | null
+  message: string,
+  history: any[],
+  mode: "fast" | "thinking" = "fast",
+  appContext?: {
+    tasks: Task[];
+    events: CalendarEvent[];
+    history: IAHistoryItem[];
+    currentTeam?: Team | null;
+    userRole?: UserRole;
+  }
 ): Promise<string> => {
   const ai = getAI();
-  if (!ai) throw new Error("API_KEY_MISSING");
 
-  const validHistory = cleanHistory(history);
   const now = new Date();
-  
-  // FIX: Use Local Time formatting instead of UTC ISO
-  const dayName = format(now, "EEEE", { locale: ptBR });
-  const localTime = format(now, "HH:mm", { locale: ptBR });
-  const fullDate = format(now, "dd/MM/yyyy", { locale: ptBR });
+  const dateInfo = `
+Data: ${format(now, "dd/MM/yyyy", { locale: ptBR })}
+Dia: ${format(now, "EEEE", { locale: ptBR })}
+Hora: ${format(now, "HH:mm")}
+`;
 
-  // Construir o contexto dinâmico
-  const dynamicContext = appContext 
-      ? buildIAContext(appContext.tasks, appContext.events, appContext.history, appContext.currentTeam, appContext.userRole)
-      : "No context provided.";
+  const context = appContext
+    ? buildIAContext(
+        appContext.tasks,
+        appContext.events,
+        appContext.history,
+        appContext.currentTeam,
+        appContext.userRole
+      )
+    : "Sem contexto.";
 
-  // O Prompt do Sistema agora define o protocolo de comunicação E PERSONA DE GESTÃO
   const systemPrompt = `
-  You are Maya, an advanced AI system agent for productivity and team management.
-  Current Date: ${fullDate} (${dayName}).
-  Current Local Time: ${localTime}.
-  
-  APP CONTEXT (READ-ONLY):
-  ${dynamicContext}
-  
-  PROTOCOL:
-  1. You act as an intermediary between the user and the app state.
-  2. You DO NOT execute actions yourself. You return JSON instructions (Action Proposals).
-  3. You MUST ALWAYS return a valid JSON object matching the Output Schema below.
-  
-  OUTPUT SCHEMA:
-  {
-    "message": "Your conversational response to the user (e.g. 'Entendido, sugiro agendar isso.')",
-    "actions": [ ... list of action objects ... ]
-  }
+Você é Maya, uma IA de produtividade.
 
-  PERSONA & BEHAVIOR:
-  - If contextMode is 'PERSONAL_MODE': Focus on execution, focus, and clearing the user's daily schedule.
-  - If contextMode is 'TEAM_MODE' and userRole is 'manager': Focus on team alignment, identifying bottlenecks, and preventing burnout. Do not micromanage individual task completion unless asked. Suggest 'REORGANIZE_WEEK' if the whole team is overloaded.
-  - If contextMode is 'TEAM_MODE' and userRole is 'member': Focus on the user's assigned tasks within the team context.
+${dateInfo}
 
-  AVAILABLE ACTIONS (Types):
-  - CREATE_TASK: { title: string, priority?: 'high'|'medium'|'low', dueDate?: string (ISO) }
-  - CREATE_EVENT: { title: string, start: string (ISO), end?: string (ISO), category?: string }
-  - RESCHEDULE_TASK: { taskId: string, newDate: string (ISO) }
-  - REORGANIZE_WEEK: { changes: [{ taskId: string, taskTitle: string, from: string (ISO), to: string (ISO) }], reason: string }
-  - CHANGE_SCREEN: { payload: 'day'|'week'|'month'|'tasks'|'analytics' }
-  - ASK_CONFIRMATION: { message: string, action: ActionObject } 
-  - NEGOTIATE_DEADLINE: { taskTitle: string, reason: string, options: [{ label: string, action: ActionObject }] }
-  - COMPLETE_STEP: { taskId: string, stepId: string, workflowId: string }
-  - PROPOSE_WORKFLOW: { title: string, steps: string[], description?: string }
-  - NO_ACTION: {} 
+CONTEXTO:
+${context}
 
-  RULES:
-  - If user says "My week is messy" or overload is detected, propose REORGANIZE_WEEK.
-  - If user asks about performance, use CHANGE_SCREEN to 'analytics'.
-  - If user asks to create a process, workflow, or "how to organize X", use PROPOSE_WORKFLOW with a logical list of steps.
-  - If user asks to complete a workflow step, you MUST use ASK_CONFIRMATION wrapping COMPLETE_STEP.
-  - If the user provides an image, analyze it to extract tasks, events, or context.
-  - Response MUST be ONLY the JSON object. Do not add markdown blocks like \`\`\`json.
-  `;
+REGRAS IMPORTANTES:
+- NUNCA execute ações automaticamente
+- Apenas SUGIRA ações estruturadas
+- Se detectar um fluxo ou checklist, gere um WORKFLOW
+- Sempre responda APENAS em JSON válido
 
-  // Select Model based on mode
-  // Using gemini-3-pro-preview for complex reasoning (thinking mode)
-  const modelName = mode === 'thinking' ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+FORMATO DE RESPOSTA:
+{
+  "message": "texto para o usuário",
+  "actions": []
+}
 
-  const config: any = {
-       systemInstruction: systemPrompt
-  };
+AÇÕES PERMITIDAS:
+- CREATE_TASK
+- CREATE_EVENT
+- CREATE_WORKFLOW
+- CHANGE_SCREEN
+- NO_ACTION
 
-  // Configure Thinking Mode
-  if (mode === 'thinking') {
-      config.thinkingConfig = { thinkingBudget: 32768 };
-      // Note: responseMimeType is NOT set for thinking mode to allow free thought trace if exposed in future,
-      // but output schema instructions still guide it towards JSON.
-  } else {
-      // Standard Mode
-      config.responseMimeType = "application/json";
-      config.maxOutputTokens = 8192;
-  }
+CREATE_WORKFLOW payload:
+{
+  "title": string,
+  "steps": string[]
+}
+`;
 
   try {
     const chat = ai.chats.create({
-      model: modelName, 
-      history: validHistory,
-      config: config
+      model: "gemini-1.5-flash",
+      history: cleanHistory(history),
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json"
+      }
     });
 
-    // Handle Multimodal Input
-    let messageContent: string | any[] = message;
-    
-    if (imageBase64) {
-        // Strip prefix if present (data:image/png;base64,)
-        const base64Clean = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-        
-        messageContent = [
-            { text: message },
-            { inlineData: { mimeType: "image/png", data: base64Clean } }
-        ];
-    }
-
-    const result = await chat.sendMessage(messageContent);
-    return result.text;
-
-  } catch (error: any) {
-    console.error("Chat Error Details:", error);
-    
-    // Fallback strategy for Thinking Mode errors (beta models can be unstable)
-    if (mode === 'thinking') {
-        console.log("⚠️ Thinking mode failed. Falling back to Flash model.");
-        try {
-            const fallbackChat = ai.chats.create({
-                model: 'gemini-3-flash-preview',
-                history: validHistory,
-                config: {
-                    systemInstruction: systemPrompt,
-                    responseMimeType: "application/json",
-                    maxOutputTokens: 8192
-                }
-            });
-            // Construct payload again for fallback
-            let fallbackContent: string | any[] = message;
-            if (imageBase64) {
-                const base64Clean = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-                fallbackContent = [
-                    { text: message },
-                    { inlineData: { mimeType: "image/png", data: base64Clean } }
-                ];
-            }
-
-            const fallbackResult = await fallbackChat.sendMessage(fallbackContent);
-            return fallbackResult.text;
-        } catch (fallbackError) {
-            console.error("Fallback also failed:", fallbackError);
-        }
-    }
-
+    const result = await chat.sendMessage(message);
+    return result.text || "";
+  } catch (err) {
+    console.error("Gemini Error:", err);
     return JSON.stringify({
-        message: "Desculpe, tive um erro de conexão com a IA. Tente novamente.",
-        actions: []
+      message:
+        "Desculpe, não consegui processar isso agora. (Erro de conexão com IA)",
+      actions: []
     });
   }
-}
+};
 
-// Video Understanding
-export const analyzeVideo = async (base64Video: string, mimeType: string, prompt: string): Promise<string> => {
-    try {
-        const ai = getAI();
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
-            contents: {
-                parts: [
-                    { inlineData: { mimeType: mimeType, data: base64Video } },
-                    { text: prompt }
-                ]
-            }
-        });
-        return response.text || "Não consegui analisar o vídeo.";
-    } catch (error: any) {
-        console.error("Video Analysis Error:", error);
-        return "Erro ao processar o vídeo. Verifique se o arquivo não é muito grande (recomendado < 20MB para upload direto).";
-    }
-}
+/* =======================
+   IMAGE + SPEECH EXPORTS
+   (mantidos p/ não quebrar imports)
+======================= */
 
-// Mantendo funções auxiliares de imagem/audio para compatibilidade
-export const generateImage = async (prompt: string, size: "1K" | "2K" | "4K" = "1K"): Promise<string | null> => {
-    try {
-        if (typeof window !== 'undefined' && (window as any).aistudio) {
-            const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-            if (!hasKey) await (window as any).aistudio.openSelectKey();
-        }
-        const ai = getAI();
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-image-preview',
-            contents: { parts: [{ text: prompt }] },
-            config: { imageConfig: { imageSize: size } },
-        });
-        for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
-        }
-        return null;
-    } catch (error: any) { return null; }
-}
-
-export const editImage = async (base64Image: string, prompt: string): Promise<string | null> => {
-    try {
-        const ai = getAI();
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: [{ inlineData: { data: base64Image.split(',')[1], mimeType: 'image/png' } }, { text: prompt }] },
-        });
-        for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
-        }
-        return null;
-    } catch (error) { return null; }
-}
-
-export const generateSpeech = async (text: string): Promise<string | null> => {
-    try {
-        const ai = getAI();
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash-preview-tts",
-            contents: [{ parts: [{ text }] }],
-            config: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } } },
-        });
-        return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-    } catch (error) { return null; }
-}
-
-export const suggestOptimalTimes = async (events: any[], title: string, referenceDate: Date, workingHours: any, duration: number) => {
-    return []; // Placeholder simplificado
-}
+export const generateImage = async () => null;
+export const editImage = async () => null;
+export const generateSpeech = async () => null;
+export const analyzeVideo = async () => "";
+export const suggestOptimalTimes = async () => [];

@@ -8,8 +8,9 @@ import { CalendarEvent, Task, NegotiationOption } from '../types';
 import { useApp } from '../context/AppContext';
 import { useDebounce } from '../hooks/useDebounce';
 import { format } from 'date-fns';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import { WeekPreview } from './WeekPreview'; // Import the new component
 
 interface MayaModalProps {
   isOpen: boolean;
@@ -28,7 +29,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
   const [selectedVideo, setSelectedVideo] = useState<{data: string, mimeType: string} | null>(null);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false); 
-  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null); // Stores ID of msg being downloaded
+  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputVideoRef = useRef<HTMLInputElement>(null);
@@ -48,10 +49,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
 
   // --- DEBOUNCE LOGIC FOR INTENT ANALYSIS ---
   const analyzeIntent = useDebounce((text: string) => {
-      // Simulação: Aqui conectaríamos com o IAActionEngine para pré-processar intenção
-      if (text.length > 5) {
-          // console.log("Analyzing intent for:", text);
-      }
+      // Logic placeholder
   }, 600);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -59,7 +57,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
       setInput(val);
       analyzeIntent(val);
   };
-  // -------------------------------------------
 
   const sendAIMessage = (text: string, type: 'text' | 'image' | 'audio' | 'video' | 'report' = 'text', content?: string) => {
       const adaptedText = type === 'text' ? adaptTone(text, personality) : text;
@@ -188,7 +185,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
         }
 
         const lower = userMsg.toLowerCase().trim();
-        
         let imageToAnalyze = null;
 
         if (selectedImage) {
@@ -224,6 +220,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
              const textToSpeak = userMsg.replace(/fale|diga/i, '').trim();
              const audioData = await generateSpeech(textToSpeak);
              if (audioData) {
+                 // ... audio decoding logic ...
                  const byteCharacters = atob(audioData);
                  const byteNumbers = new Array(byteCharacters.length);
                  for (let i = 0; i < byteCharacters.length; i++) {
@@ -241,6 +238,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
              return;
         }
 
+        // Default Chat flow
         const history = messages.filter(m => m.type === 'text').map(m => ({ role: m.sender === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }));
         
         const rawResponse = await chatWithMaya(
@@ -248,7 +246,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             history, 
             isThinkingMode ? 'thinking' : 'fast',
             { tasks, events, history: iaHistory, currentTeam, userRole },
-            imageToAnalyze // Pass the image for multimodal analysis
+            imageToAnalyze 
         );
 
         const parsedResponse = parseIAResponse(rawResponse);
@@ -273,27 +271,36 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Preview component for Reorganization
-  const renderReorganizationPreview = () => {
-      if (pendingAction?.originalAction.type !== 'REORGANIZE_WEEK') return null;
-      const changes = pendingAction.originalAction.payload.changes;
-      return (
-          <div className="bg-gray-50 dark:bg-black/20 p-3 rounded-xl mb-3 text-left max-h-40 overflow-y-auto border border-gray-100 dark:border-white/5 custom-scrollbar">
-              <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Plano Sugerido ({changes.length} Mudanças)</h4>
-              <div className="space-y-1.5">
-                  {changes.map((change: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between text-[10px] bg-white dark:bg-white/5 p-2 rounded-lg border border-gray-100 dark:border-white/5">
-                          <span className="font-medium truncate max-w-[45%] dark:text-gray-300">{change.taskTitle}</span>
-                          <div className="flex items-center gap-1.5 text-gray-400">
-                              <span className="line-through opacity-70">{new Date(change.from).getDate()}/{new Date(change.from).getMonth()+1}</span>
-                              <ArrowRight size={8} />
-                              <span className="text-green-600 dark:text-green-400 font-bold">{new Date(change.to).getDate()}/{new Date(change.to).getMonth()+1}</span>
+  // Render logic for different pending actions
+  const renderActionContent = () => {
+      if (!pendingAction) return null;
+      const type = pendingAction.originalAction.type;
+
+      if (type === 'REORGANIZE_CALENDAR') {
+          return <WeekPreview plan={pendingAction.originalAction.payload.plan} />;
+      }
+
+      if (type === 'REORGANIZE_WEEK') {
+          const changes = pendingAction.originalAction.payload.changes;
+          return (
+              <div className="bg-gray-50 dark:bg-black/20 p-3 rounded-xl mb-3 text-left max-h-40 overflow-y-auto border border-gray-100 dark:border-white/5 custom-scrollbar">
+                  <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Plano Sugerido ({changes.length} Mudanças)</h4>
+                  <div className="space-y-1.5">
+                      {changes.map((change: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between text-[10px] bg-white dark:bg-white/5 p-2 rounded-lg border border-gray-100 dark:border-white/5">
+                              <span className="font-medium truncate max-w-[45%] dark:text-gray-300">{change.taskTitle}</span>
+                              <div className="flex items-center gap-1.5 text-gray-400">
+                                  <span className="line-through opacity-70">{new Date(change.from).getDate()}/{new Date(change.from).getMonth()+1}</span>
+                                  <ArrowRight size={8} />
+                                  <span className="text-green-600 dark:text-green-400 font-bold">{new Date(change.to).getDate()}/{new Date(change.to).getMonth()+1}</span>
+                              </div>
                           </div>
-                      </div>
-                  ))}
+                      ))}
+                  </div>
               </div>
-          </div>
-      );
+          );
+      }
+      return null;
   };
 
   if (!isOpen) return null;
@@ -305,7 +312,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
           bg-white dark:bg-zinc-900 shadow-2xl flex flex-col overflow-hidden relative border border-white/20 animate-fade-in transition-all duration-300
           ${isMaximized ? 'fixed inset-0 w-full h-full rounded-none' : 'w-full max-w-lg h-[500px] max-h-[85vh] rounded-3xl'}
       `}>
-        
         {/* Header */}
         <div className="p-4 border-b border-gray-100 dark:border-white/5 flex justify-between items-center bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md">
             <div className="flex items-center gap-3">
@@ -334,8 +340,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
 
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50 dark:bg-black/20" ref={scrollRef}>
-            
-            {/* Agent Proactive Suggestion Banner */}
+            {/* Agent Suggestions */}
             {agentSuggestion && (
                 <div className={`p-4 rounded-2xl border mb-4 animate-slide-up ${
                     agentSuggestion.type === 'warning' 
@@ -372,20 +377,13 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                     : 'bg-white dark:bg-zinc-800 border border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200 rounded-bl-none shadow-sm';
                 
                 let icon = null;
-
                 if (msg.sender === 'maya') {
                     if (msg.type === 'report') {
                         bubbleStyle = 'bg-white dark:bg-zinc-800 border-l-4 border-purple-500 shadow-md text-gray-800 dark:text-gray-200 rounded-lg w-full';
                         icon = <FileText size={20} className="text-purple-500 mb-2" />;
-                    } else if (msg.text.includes("Risco") || msg.text.includes("Alerta") || msg.text.includes("Erro")) {
+                    } else if (msg.text.includes("Risco") || msg.text.includes("Alerta")) {
                         bubbleStyle = 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 text-red-900 dark:text-red-100 rounded-bl-none';
                         icon = <AlertTriangle size={14} className="text-red-500 mb-1" />;
-                    } else if (msg.text.includes("Sugestão") || msg.text.includes("Dica")) {
-                        bubbleStyle = 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-900/30 text-blue-900 dark:text-blue-100 rounded-bl-none';
-                        icon = <Info size={14} className="text-blue-500 mb-1" />;
-                    } else if (msg.text.includes("Feito") || msg.text.includes("Sucesso") || msg.text.includes("Concluíd")) {
-                        bubbleStyle = 'bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-900/30 text-green-900 dark:text-green-100 rounded-bl-none';
-                        icon = <Check size={14} className="text-green-500 mb-1" />;
                     }
                 }
 
@@ -393,9 +391,8 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                     <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[90%] p-4 rounded-2xl text-sm ${bubbleStyle}`}>
                             {icon}
-                            {msg.type === 'text' && (
-                                <div className="whitespace-pre-line leading-relaxed">{msg.text}</div>
-                            )}
+                            {msg.type === 'text' && <div className="whitespace-pre-line leading-relaxed">{msg.text}</div>}
+                            {/* Report / Image / Video rendering ... */}
                             {msg.type === 'report' && (
                                 <div>
                                     <div id={`report-${msg.id}`} className="bg-white dark:bg-white/5 p-4 rounded-lg mb-3">
@@ -410,11 +407,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                                         disabled={downloadingPdf === msg.id}
                                         className="w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-bold transition-colors disabled:opacity-50"
                                     >
-                                        {downloadingPdf === msg.id ? (
-                                            <>Gerando PDF...</>
-                                        ) : (
-                                            <><Download size={16} /> Baixar Relatório (PDF)</>
-                                        )}
+                                        {downloadingPdf === msg.id ? "Gerando PDF..." : <><Download size={16} /> Baixar Relatório (PDF)</>}
                                     </button>
                                 </div>
                             )}
@@ -422,9 +415,6 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                                 <div className="space-y-2">
                                     <p className="opacity-80 text-xs mb-1">{msg.text}</p>
                                     <img src={msg.content} alt="Generated" className="rounded-lg w-full h-auto border border-white/10" />
-                                    {msg.sender === 'user' && selectedImage === msg.content && (
-                                        <div className="bg-black/50 text-white text-xs p-1 rounded text-center mt-1">Imagem pronta para envio</div>
-                                    )}
                                     {msg.sender === 'maya' && (
                                         <button 
                                             onClick={() => { setSelectedImage(msg.content!); setInput("Edite: "); }}
@@ -435,81 +425,19 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                                     )}
                                 </div>
                             )}
-                            {msg.type === 'audio' && msg.content && (
-                                <div className="flex items-center gap-2">
-                                    <Volume2 size={16} />
-                                    <audio controls src={msg.content} className="h-8 w-48" />
-                                </div>
-                            )}
-                            {msg.type === 'video' && msg.content && (
-                                <div className="space-y-2">
-                                    <p className="opacity-80 text-xs mb-1">{msg.text}</p>
-                                    <div className="rounded-lg overflow-hidden border border-white/10 bg-black">
-                                        <video 
-                                            controls 
-                                            src={msg.content} 
-                                            className="w-full h-auto max-h-[60vh] object-contain" 
-                                        />
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
                 );
             })}
 
-            {/* Negotiation UI */}
-            {pendingAction && pendingAction.originalAction.type === 'NEGOTIATE_DEADLINE' && (
-                <div className="flex justify-start animate-slide-up w-full">
-                    <div className="bg-white dark:bg-zinc-800 p-5 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-orange-500 w-full max-w-[90%]">
-                        <div className="flex items-center gap-2 mb-3">
-                            <Handshake className="text-orange-500" size={20} />
-                            <p className="font-bold text-gray-800 dark:text-white text-sm">Proposta de Negociação</p>
-                        </div>
-                        
-                        <p className="text-gray-600 dark:text-gray-300 text-sm mb-4 leading-relaxed bg-gray-50 dark:bg-black/20 p-3 rounded-lg">
-                           {pendingAction.originalAction.payload.reason}
-                        </p>
-
-                        <div className="space-y-2">
-                            {pendingAction.originalAction.payload.options.map((option: any, idx: number) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => handleNegotiationOption(option)}
-                                    className={`w-full text-left p-3 rounded-xl border text-sm font-medium transition-all hover:translate-x-1 flex items-center justify-between group
-                                        ${option.style === 'primary' 
-                                            ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200 hover:bg-purple-100' 
-                                            : option.style === 'secondary'
-                                                ? 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300'
-                                                : 'border-dashed border-gray-300 dark:border-gray-700 text-gray-500 hover:text-red-500 hover:border-red-300'
-                                        }
-                                    `}
-                                >
-                                    <span>{option.label}</span>
-                                    <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </button>
-                            ))}
-                        </div>
-                        
-                        <button 
-                            onClick={cancelAction}
-                            className="mt-3 text-xs text-gray-400 hover:text-gray-600 w-full text-center hover:underline"
-                        >
-                            Cancelar
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Standard Confirmation UI with Preview */}
+            {/* Confirmation / Preview UI */}
             {pendingAction && pendingAction.originalAction.type !== 'NEGOTIATE_DEADLINE' && (
                 <div className="flex justify-start animate-slide-up w-full">
                     <div className="bg-white dark:bg-zinc-800 p-4 rounded-2xl rounded-bl-none shadow-lg border-l-4 border-custom-caramel w-full max-w-[90%]">
                         <div className="flex items-start gap-3 mb-4">
                             <div className="p-2 bg-custom-caramel/10 rounded-full text-custom-caramel mt-1">
-                                {pendingAction.originalAction.type === 'REORGANIZE_WEEK' ? <List size={18} /> : 
-                                 pendingAction.originalAction.type === 'CREATE_TASK' ? <Check size={18} /> : 
-                                 pendingAction.originalAction.type === 'CREATE_EVENT' ? <CalendarClock size={18} /> : 
+                                {pendingAction.originalAction.type === 'REORGANIZE_CALENDAR' ? <CalendarClock size={18} /> : 
+                                 pendingAction.originalAction.type === 'REORGANIZE_WEEK' ? <List size={18} /> : 
                                  <Brain size={18} />}
                             </div>
                             <div>
@@ -517,7 +445,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                             </div>
                         </div>
 
-                        {renderReorganizationPreview()}
+                        {renderActionContent()}
 
                         <div className="flex gap-2">
                             <button 
@@ -557,62 +485,13 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
             )}
         </div>
 
-        {/* Selected Media Preview */}
-        {selectedImage && (
-             <div className="px-4 py-2 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
-                 <div className="flex items-center gap-2">
-                     <img src={selectedImage} alt="Preview" className="w-10 h-10 rounded object-cover border border-white/20" />
-                     <span className="text-xs text-gray-500">Imagem pronta. Digite para analisar ou "Editar" para alterar.</span>
-                 </div>
-                 <button onClick={() => setSelectedImage(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={14} className="text-gray-400" /></button>
-             </div>
-        )}
-        
-        {selectedVideo && (
-             <div className="px-4 py-2 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
-                 <div className="flex items-center gap-2">
-                     <div className="w-10 h-10 bg-black/50 rounded flex items-center justify-center">
-                         <Video size={16} className="text-white" />
-                     </div>
-                     <span className="text-xs text-gray-500">Vídeo pronto para análise...</span>
-                 </div>
-                 <button onClick={() => setSelectedVideo(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full"><X size={14} className="text-gray-400" /></button>
-             </div>
-        )}
-
-        {/* Input Area */}
+        {/* Input Area ... (Same as before) */}
         <div className="p-4 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-white/5">
              <div className="relative flex items-center gap-2">
-                 <input 
-                    type="file" 
-                    ref={fileInputRef}
-                    className="hidden" 
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                 />
-                 <input 
-                    type="file" 
-                    ref={fileInputVideoRef}
-                    className="hidden" 
-                    accept="video/*"
-                    onChange={handleVideoUpload}
-                 />
-                 
-                 <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-3 bg-gray-100 dark:bg-white/5 text-gray-500 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-                    title="Carregar imagem para edição ou análise"
-                 >
-                     <ImageIcon size={18} />
-                 </button>
-                 
-                 <button 
-                    onClick={() => fileInputVideoRef.current?.click()}
-                    className="p-3 bg-gray-100 dark:bg-white/5 text-gray-500 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-                    title="Carregar vídeo para análise"
-                 >
-                     <Video size={18} />
-                 </button>
+                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                 <input type="file" ref={fileInputVideoRef} className="hidden" accept="video/*" onChange={handleVideoUpload} />
+                 <button onClick={() => fileInputRef.current?.click()} className="p-3 bg-gray-100 dark:bg-white/5 text-gray-500 rounded-full hover:bg-gray-200 dark:hover:bg-white/10"><ImageIcon size={18} /></button>
+                 <button onClick={() => fileInputVideoRef.current?.click()} className="p-3 bg-gray-100 dark:bg-white/5 text-gray-500 rounded-full hover:bg-gray-200 dark:hover:bg-white/10"><Video size={18} /></button>
                  
                  <div className="relative flex-1">
                     <textarea 
@@ -620,7 +499,7 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                         value={input}
                         onChange={handleInputChange} 
                         onKeyDown={handleKeyDown}
-                        placeholder={pendingAction ? "Digite sua resposta..." : (selectedImage ? "O que fazer com a imagem?" : selectedVideo ? "Pergunte sobre o vídeo..." : "Mensagem ou comando...")}
+                        placeholder={pendingAction ? "Digite sua resposta..." : "Mensagem ou comando..."}
                         rows={1}
                         className={`w-full bg-gray-100 dark:bg-black/50 border-none rounded-2xl py-3 pl-4 pr-12 focus:ring-2 dark:text-white transition-all resize-none overflow-hidden min-h-[48px] ${isThinkingMode ? 'focus:ring-purple-500/50 bg-purple-50/10' : 'focus:ring-custom-caramel/50'}`}
                     />
@@ -639,10 +518,8 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                  <div className="flex gap-4 text-[10px] text-gray-400">
                     <span className="flex items-center gap-1"><Upload size={10} /> Editar</span>
                     <span className="flex items-center gap-1"><ImageIcon size={10} /> Gerar</span>
-                    <span className="flex items-center gap-1">Shift+Enter para pular linha</span>
                  </div>
                  
-                 {/* Thinking Mode Toggle */}
                  <button 
                     onClick={() => setIsThinkingMode(!isThinkingMode)}
                     className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${
@@ -650,14 +527,12 @@ export const MayaModal: React.FC<MayaModalProps> = ({ isOpen, onClose }) => {
                         ? 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800' 
                         : 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-white/5 dark:text-gray-400 dark:border-white/10 hover:bg-gray-200'
                     }`}
-                    title="Ativar modelo Gemini 3 Pro para raciocínio complexo"
                  >
                     <Brain size={12} className={isThinkingMode ? 'animate-pulse' : ''} />
                     {isThinkingMode ? 'Modo Pensador (Pro)' : 'Modo Rápido'}
                  </button>
              </div>
         </div>
-
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { AlertTriangle, Check, X, CalendarClock, Brain, List, ArrowRight } from 'lucide-react';
+import { AlertTriangle, Check, X, CalendarClock, Brain, List, ArrowRight, Layers, LayoutList } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -24,6 +24,7 @@ export const IAConfirmationModal: React.FC = () => {
       const type = pendingAction.originalAction.type;
       if (type === 'RESCHEDULE_TASK') return <CalendarClock size={32} className="text-orange-500" />;
       if (type === 'REORGANIZE_WEEK') return <List size={32} className="text-blue-500" />;
+      if (type === 'PROPOSE_WORKFLOW') return <Layers size={32} className="text-purple-600" />;
       if (type === 'CREATE_TASK' || type === 'CREATE_EVENT') return <Check size={32} className="text-green-500" />;
       return <Brain size={32} className="text-purple-500" />;
   };
@@ -35,10 +36,10 @@ export const IAConfirmationModal: React.FC = () => {
       const changes = pendingAction.originalAction.payload.changes;
 
       return (
-          <div className="bg-gray-50 dark:bg-black/20 p-4 rounded-xl mb-6 text-left max-h-48 overflow-y-auto border border-gray-100 dark:border-white/5">
+          <div className="bg-gray-50 dark:bg-black/20 p-4 rounded-xl mb-6 text-left max-h-48 overflow-y-auto border border-gray-100 dark:border-white/5 custom-scrollbar">
               <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Plano de Mudanças ({changes.length})</h4>
               <div className="space-y-2">
-                  {changes.map((change, idx) => (
+                  {changes.map((change: any, idx: number) => (
                       <div key={idx} className="flex items-center justify-between text-xs bg-white dark:bg-white/5 p-2 rounded-lg border border-gray-100 dark:border-white/5">
                           <span className="font-medium truncate max-w-[40%] dark:text-gray-300">{change.taskTitle}</span>
                           <div className="flex items-center gap-2 text-gray-400">
@@ -46,6 +47,33 @@ export const IAConfirmationModal: React.FC = () => {
                               <ArrowRight size={10} />
                               <span className="text-green-600 dark:text-green-400 font-bold">{format(new Date(change.to), 'dd/MM')}</span>
                           </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      );
+  };
+
+  // New: Render logic for Workflow Proposal preview
+  const renderWorkflowPreview = () => {
+      if (pendingAction.originalAction.type !== 'PROPOSE_WORKFLOW') return null;
+      
+      const { title, steps } = pendingAction.originalAction.payload;
+
+      return (
+          <div className="bg-gray-50 dark:bg-black/20 p-4 rounded-xl mb-6 text-left max-h-60 overflow-y-auto border border-gray-100 dark:border-white/5 custom-scrollbar">
+              <div className="flex items-center gap-2 mb-3">
+                  <LayoutList size={14} className="text-purple-500" />
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Estrutura do Fluxo: <span className="text-purple-600 dark:text-purple-400">{title}</span></h4>
+              </div>
+              
+              <div className="space-y-2">
+                  {steps.map((step: string, idx: number) => (
+                      <div key={idx} className="flex items-start gap-3 text-xs bg-white dark:bg-white/5 p-3 rounded-lg border border-gray-100 dark:border-white/5">
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 flex items-center justify-center font-bold text-[10px]">
+                              {idx + 1}
+                          </span>
+                          <span className="font-medium text-gray-700 dark:text-gray-200 mt-0.5">{step}</span>
                       </div>
                   ))}
               </div>
@@ -69,11 +97,15 @@ export const IAConfirmationModal: React.FC = () => {
 
         {/* Content */}
         <div className="p-6 text-center">
-          <p className="text-gray-600 dark:text-gray-300 text-lg mb-8 leading-relaxed">
-            {pendingAction.question}
-          </p>
+          {/* Use specific preview or fallback to question text */}
+          {!renderReorganizationPreview() && !renderWorkflowPreview() && (
+              <p className="text-gray-600 dark:text-gray-300 text-lg mb-8 leading-relaxed">
+                {pendingAction.question}
+              </p>
+          )}
 
           {renderReorganizationPreview()}
+          {renderWorkflowPreview()}
 
           <div className="flex gap-3">
             <button 

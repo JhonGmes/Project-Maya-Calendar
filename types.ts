@@ -294,6 +294,16 @@ export interface TaskChange {
     benefit?: string;
 }
 
+export interface EventReorgPlan {
+    originalEventId: string;
+    title: string;
+    oldStart: string;
+    oldEnd: string;
+    newStart: string;
+    newEnd: string;
+    reason: string;
+}
+
 export interface NegotiationOption {
     label: string;
     action: IAAction;
@@ -341,6 +351,13 @@ export type IAAction =
       payload: {
           changes: TaskChange[];
           reason: string;
+      };
+    }
+  | {
+      type: "REORGANIZE_CALENDAR"; // New Action for Events
+      payload: {
+          plan: EventReorgPlan[];
+          summary: string;
       };
     }
   | {
