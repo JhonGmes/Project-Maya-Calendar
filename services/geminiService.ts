@@ -1,68 +1,57 @@
-import { GoogleGenAI, Content } from "@google/genai";
+
+import { GoogleGenAI, Content, Part } from "@google/genai";
 import {
   Task,
   CalendarEvent,
   IAHistoryItem,
   Team,
-  UserRole
+  UserRole,
+  TimeSuggestion
 } from "../types";
 import { buildIAContext } from "../utils/iaContextBuilder";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 /* =======================
-   ENVIRONMENT SAFE SETUP
+   1. INICIALIZAÇÃO SEGURA
 ======================= */
-try {
-  if (typeof process === "undefined") {
-    (window as any).process = { env: {} };
-  }
-  if (!process.env) {
-    (window as any).process.env = {};
-  }
-
-  const viteEnv = (import.meta as any).env || {};
-  process.env.API_KEY =
-    viteEnv.VITE_GEMINI_API_KEY ||
-    viteEnv.VITE_API_KEY ||
-    viteEnv.VITE_GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    "";
-} catch {
-  console.warn("Erro ao configurar ambiente");
-}
-
 const getAI = () => {
-  let key = process.env.API_KEY;
-  if (!key && typeof window !== "undefined") {
-    key = localStorage.getItem("maya_api_key") || "";
-  }
+  // Always obtain API key exclusively from process.env.API_KEY as per guidelines
+  const apiKey = process.env.API_KEY;
 
-  if (!key) {
-    throw new Error("API_KEY_MISSING");
-  }
-
-  return new GoogleGenAI({ apiKey: key.trim() });
+  if (!apiKey) throw new Error("API_KEY_MISSING");
+  return new GoogleGenAI({ apiKey: apiKey });
 };
 
 /* =======================
-   HISTORY SANITIZER
+   2. LIMPEZA DE HISTÓRICO (ANTI-CRASH)
 ======================= */
-function cleanHistory(history: any[]): Content[] {
+function sanitizeHistory(history: any[]): Content[] {
   return history
-    .filter(
-      msg =>
-        msg?.parts?.[0]?.text &&
-        msg.parts[0].text.trim().length > 0
-    )
-    .map(msg => ({
-      role: msg.role,
-      parts: [{ text: msg.parts[0].text }]
-    }));
+    .slice(-10) // Mantém apenas o contexto recente
+    .map(msg => {
+      const role = (msg.sender === 'user' || msg.role === 'user') ? 'user' : 'model';
+      let textContent = "";
+
+      if (msg.parts && Array.isArray(msg.parts)) {
+        textContent = msg.parts.map((p: any) => p.text || "").join(" ");
+      } else {
+        textContent = msg.text || msg.content || "";
+      }
+
+      const cleanText = textContent.trim();
+      if (!cleanText) return null;
+
+      return {
+        role: role as "user" | "model",
+        parts: [{ text: cleanText }]
+      };
+    })
+    .filter((msg): msg is Content => msg !== null);
 }
 
 /* =======================
-   MAIN CHAT FUNCTION
+   3. CHAT INTELIGENTE (MAYA)
 ======================= */
 export const chatWithMaya = async (
   message: string,
@@ -74,90 +63,76 @@ export const chatWithMaya = async (
     history: IAHistoryItem[];
     currentTeam?: Team | null;
     userRole?: UserRole;
-  }
+  },
+  image?: string
 ): Promise<string> => {
-  const ai = getAI();
-
-  const now = new Date();
-  const dateInfo = `
-Data: ${format(now, "dd/MM/yyyy", { locale: ptBR })}
-Dia: ${format(now, "EEEE", { locale: ptBR })}
-Hora: ${format(now, "HH:mm")}
-`;
-
-  const context = appContext
-    ? buildIAContext(
-        appContext.tasks,
-        appContext.events,
-        appContext.history,
-        appContext.currentTeam,
-        appContext.userRole
-      )
-    : "Sem contexto.";
-
-  const systemPrompt = `
-Você é Maya, uma IA de produtividade.
-
-${dateInfo}
-
-CONTEXTO:
-${context}
-
-REGRAS IMPORTANTES:
-- NUNCA execute ações automaticamente
-- Apenas SUGIRA ações estruturadas
-- Se detectar um fluxo ou checklist, gere um WORKFLOW
-- Sempre responda APENAS em JSON válido
-
-FORMATO DE RESPOSTA:
-{
-  "message": "texto para o usuário",
-  "actions": []
-}
-
-AÇÕES PERMITIDAS:
-- CREATE_TASK
-- CREATE_EVENT
-- CREATE_WORKFLOW
-- CHANGE_SCREEN
-- NO_ACTION
-
-CREATE_WORKFLOW payload:
-{
-  "title": string,
-  "steps": string[]
-}
-`;
-
   try {
+    const ai = getAI();
+    const isThinking = mode === 'thinking';
+    const modelName = isThinking ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+
+    const now = new Date();
+    const dateInfo = format(now, "eeee, dd/MM HH:mm", { locale: ptBR });
+    const context = appContext ? buildIAContext(appContext.tasks, appContext.events) : "{}";
+
+    const systemInstruction = `
+Você é Maya, assistente IA de produtividade de elite.
+DATA ATUAL: ${dateInfo}
+CONTEXTO DO USUÁRIO: ${context}
+
+DIRETRIZES:
+1. Responda estritamente em JSON: { "message": "Texto", "actions": [] }
+2. Actions válidas: CREATE_TASK, CREATE_EVENT, CHANGE_SCREEN, RESCHEDULE_TASK, REORGANIZE_WEEK, NO_ACTION.
+3. Se o usuário estiver sobrecarregado, seja empática e sugira adiar tarefas.
+`;
+
+    const chatHistory = sanitizeHistory(history);
+
+    const config: any = {
+      // systemInstruction should be a direct string in the config object
+      systemInstruction: systemInstruction,
+      responseMimeType: "application/json"
+    };
+
+    // Aplica Thinking Budget se for o modelo Pro
+    if (isThinking) {
+      config.thinkingConfig = { thinkingBudget: 32768 };
+    }
+
     const chat = ai.chats.create({
-      model: "gemini-1.5-flash",
-      history: cleanHistory(history),
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: "application/json"
-      }
+      model: modelName,
+      history: chatHistory,
+      config: config
     });
 
-    const result = await chat.sendMessage(message);
-    return result.text || "";
-  } catch (err) {
-    console.error("Gemini Error:", err);
+    const parts: Part[] = [{ text: message }];
+    
+    if (image) {
+      const base64Data = image.includes(',') ? image.split(',')[1] : image;
+      parts.push({
+        inlineData: { mimeType: "image/jpeg", data: base64Data }
+      });
+    }
+
+    // chat.sendMessage accepts a 'message' parameter, not 'contents'
+    const result = await chat.sendMessage({ message: parts });
+    // Use .text property directly
+    return result.text || JSON.stringify({ message: "Não consegui processar agora.", actions: [] });
+
+  } catch (err: any) {
+    console.error("Maya Chat Error:", err);
     return JSON.stringify({
-      message:
-        "Desculpe, não consegui processar isso agora. (Erro de conexão com IA)",
+      message: "Minha rede neural teve um soluço. Pode repetir?",
       actions: []
     });
   }
 };
 
-/* =======================
-   IMAGE + SPEECH EXPORTS
-   (mantidos p/ não quebrar imports)
-======================= */
-
-export const generateImage = async () => null;
-export const editImage = async () => null;
-export const generateSpeech = async () => null;
-export const analyzeVideo = async () => "";
-export const suggestOptimalTimes = async () => [];
+// Stubs para compatibilidade
+// Fixed: components/MayaModal.tsx on line 209: Expected 1 arguments, but got 2.
+export const generateImage = async (p: string, size?: string) => null;
+export const editImage = async (b: string, p: string) => null;
+export const generateSpeech = async (t: string) => null;
+export const analyzeVideo = async (b: string, m: string, p: string) => "Análise indisponível.";
+// Fixed: components/EventModal.tsx on line 67: Expected 0 arguments, but got 5.
+export const suggestOptimalTimes = async (...args: any[]) => [];

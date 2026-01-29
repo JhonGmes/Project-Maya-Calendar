@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { supabase } from "../services/supabaseClient";
+import { supabase, isSupabaseConfigured } from "../services/supabaseClient";
 import { StorageService } from "../services/storage";
 import { User } from "@supabase/supabase-js";
 
@@ -22,42 +22,58 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isLocalMode, setIsLocalMode] = useState(StorageService.isLocalMode());
 
   useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (!isLocalMode) setLoading(false);
-    });
+    if (isLocalMode) {
+        setLoading(false);
+        return;
+    }
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => {
-      subscription.unsubscribe();
+    const initAuth = async () => {
+        try {
+            if (isSupabaseConfigured) {
+                const { data: { session }, error } = await supabase.auth.getSession();
+                if (error) throw error;
+                setUser(session?.user ?? null);
+            } else {
+                // Se não estiver configurado, não tenta conectar
+                setUser(null);
+            }
+        } catch (error) {
+            console.warn("Auth Init Error (Supabase not reachable):", error);
+            // Fallback silencioso
+        } finally {
+            setLoading(false);
+        }
     };
+
+    initAuth();
+
+    // Setup listener only if configured
+    if (isSupabaseConfigured) {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null);
+            setLoading(false);
+        });
+        return () => subscription.unsubscribe();
+    }
   }, [isLocalMode]);
 
   async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    if (!isSupabaseConfigured) throw new Error("Banco de dados não configurado. Use o Modo Offline.");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   }
 
   async function signUp(email: string, password: string) {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    if (!isSupabaseConfigured) throw new Error("Banco de dados não configurado.");
+    const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
     if (data.user) setUser(data.user);
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    if (isSupabaseConfigured) {
+        await supabase.auth.signOut();
+    }
     setUser(null);
     if (isLocalMode) {
         setLocalMode(false);

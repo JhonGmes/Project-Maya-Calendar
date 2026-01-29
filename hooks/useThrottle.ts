@@ -7,7 +7,7 @@ export function useThrottle<T extends (...args: any[]) => void>(
 ) {
   const inThrottle = useRef(false);
   const lastRan = useRef<number>(0);
-  const timer = useRef<number>();
+  const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     return () => {

@@ -5,7 +5,7 @@ export function useDebounce<T extends (...args: any[]) => void>(
   fn: T,
   delay = 300
 ) {
-  const timer = useRef<number>();
+  const timer = useRef<number | undefined>(undefined);
 
   // Limpar timer se o componente desmontar
   useEffect(() => {
